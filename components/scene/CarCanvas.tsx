@@ -27,9 +27,10 @@ export default function CarCanvas({ dark }: { dark: boolean }) {
   return (
     <Canvas
       flat
+      fallback={<div className="grid h-full place-items-center p-6 text-center text-sm text-muted">3D viewing is unavailable in this browser. You can still search parts and ask the mechanic.</div>}
       frameloop="demand"
       shadows={shadowType}
-      dpr={quality === "ultra" ? [1.5, 2] : [1, dpr]}
+      dpr={quality === "balanced" ? 1 : quality === "ultra" ? [1.5, 2] : [1, dpr]}
       gl={{ antialias: false, powerPreference: "high-performance", stencil: false, alpha: false }}
       camera={{ position: [6.4, 2.1, 7.1], fov: 30, near: 0.1, far: 120 }}
       onPointerMissed={() => useScene.getState().select(null)}
@@ -39,7 +40,7 @@ export default function CarCanvas({ dark }: { dark: boolean }) {
       }}
     >
       <RenderActivity quality={quality} onDpr={setDpr} />
-      <Studio dark={dark} quality={quality} />
+      <Studio dark={dark} quality={quality} built={built && built.id === carId ? built : null} />
       <Selection>
         <CarModel carId={carId} dark={dark} onBuilt={onBuilt} />
         <EffectComposer enabled={fx} multisampling={quality === "ultra" ? 4 : 0} enableNormalPass={false} autoClear={false}>

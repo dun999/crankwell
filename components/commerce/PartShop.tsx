@@ -38,7 +38,7 @@ export function PartShop({ carId, partId, skus, onClose }: { carId: CarId; partI
     );
 
   return (
-    <div className="space-y-2.5 rounded-xl border border-line bg-surface-solid/60 p-2.5">
+    <div className="space-y-2.5 rounded-2xl border border-line bg-surface-2/70 p-3">
       <div className="flex items-center justify-between">
         <div className="text-xs font-semibold">Choose a part</div>
         {onClose && (

@@ -1,47 +1,20 @@
 "use client";
 import clsx from "clsx";
-import { CalendarCheck, ExternalLink, Package, Receipt, RefreshCw, Webhook, Wrench, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ExternalLink, Receipt, RefreshCw, Webhook, X } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useEffect, useMemo, useState } from "react";
 import { commerce } from "@/lib/commerce/client";
-import type { Transaction, TxStatus } from "@/lib/commerce/types";
+import type { Transaction } from "@/lib/commerce/types";
 import { useOrders } from "@/lib/store/orders";
-import { Button, IconButton, money } from "../ui";
+import { Button, IconButton, Modal, money } from "../ui";
+import { KIND, StatusPill } from "./txMeta";
 
-const STATUS: Record<TxStatus, { label: string; tone: "ok" | "warn" | "muted" | "danger" | "accent" }> = {
-  CREATED: { label: "Awaiting approval", tone: "muted" },
-  APPROVED: { label: "Approved", tone: "accent" },
-  COMPLETED: { label: "Paid", tone: "ok" },
-  AUTHORIZED: { label: "Deposit held", tone: "accent" },
-  CAPTURED: { label: "Deposit captured", tone: "ok" },
-  VOIDED: { label: "Released", tone: "muted" },
-  REFUNDED: { label: "Refunded", tone: "warn" },
-  DENIED: { label: "Denied", tone: "danger" },
-  FAILED: { label: "Failed", tone: "danger" },
-  DRAFT: { label: "Draft", tone: "muted" },
-  SENT: { label: "Invoice sent", tone: "accent" },
-  UNPAID: { label: "Unpaid", tone: "warn" },
-  PAID: { label: "Paid", tone: "ok" },
-  CANCELLED: { label: "Cancelled", tone: "muted" },
-};
+const OrdersLedger = dynamic(() => import("./OrdersLedger"), {
+  ssr: false,
+  loading: () => <p role="status" className="p-4 text-sm text-muted">Loading ledger…</p>,
+});
 
-export function StatusPill({ status }: { status: TxStatus }) {
-  const s = STATUS[status];
-  const color = { ok: "var(--ok)", warn: "var(--warn)", muted: "var(--muted)", danger: "var(--danger)", accent: "var(--accent)" }[s.tone];
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ color, background: `color-mix(in srgb, ${color} 12%, transparent)` }}>
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
-      {s.label}
-    </span>
-  );
-}
-
-const KIND = {
-  parts: { icon: Package, label: "Parts order · PayPal Orders v2" },
-  shop_deposit: { icon: CalendarCheck, label: "Shop reservation · Orders + Payments v2" },
-  technician_invoice: { icon: Wrench, label: "Technician visit · Invoicing v2" },
-};
-
-function TxCard({ tx }: { tx: Transaction }) {
+function TxDetail({ tx }: { tx: Transaction }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const K = KIND[tx.kind];
@@ -56,47 +29,31 @@ function TxCard({ tx }: { tx: Transaction }) {
       setBusy(null);
     }
   };
+  const ids = [
+    ["Order", tx.paypal.orderId],
+    ["Capture", tx.paypal.captureId],
+    ["Authorization", tx.paypal.authorizationId],
+    ["Refund", tx.paypal.refundId],
+    ["Invoice", tx.paypal.invoiceId && `${tx.paypal.invoiceNumber} · ${tx.paypal.invoiceId}`],
+  ].filter((r): r is [string, string] => Boolean(r[1]));
   return (
-    <li className="rounded-2xl border border-line bg-surface-solid/70 p-3">
-      <div className="flex items-start gap-2.5">
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-muted">
-          <K.icon size={17} />
+    <article aria-label={`${tx.title} details`} className="space-y-4">
+      <div className="flex items-start gap-3">
+        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface-3 text-ink">
+          <K.icon size={18} strokeWidth={1.75} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2">
-            <div className="truncate text-sm font-semibold">{tx.title}</div>
-            <div className="text-sm font-semibold tabular-nums">{money(Number(tx.amount))}</div>
-          </div>
-          <div className="mt-0.5 flex items-center justify-between gap-2">
-            <span className="truncate text-[11px] text-muted">{K.label}</span>
-            <StatusPill status={tx.status} />
-          </div>
-          {tx.detail && <div className="mt-1 text-xs text-muted">{tx.detail}</div>}
+          <h3 className="text-[15px] font-semibold leading-snug tracking-[-0.01em]">{tx.title}</h3>
+          <div className="text-[11px] text-muted">{K.label}</div>
         </div>
       </div>
-      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono text-[10.5px] text-muted">
-        {tx.paypal.orderId && (<><dt>order</dt><dd className="truncate">{tx.paypal.orderId}</dd></>)}
-        {tx.paypal.captureId && (<><dt>capture</dt><dd className="truncate">{tx.paypal.captureId}</dd></>)}
-        {tx.paypal.authorizationId && (<><dt>auth</dt><dd className="truncate">{tx.paypal.authorizationId}</dd></>)}
-        {tx.paypal.refundId && (<><dt>refund</dt><dd className="truncate">{tx.paypal.refundId}</dd></>)}
-        {tx.paypal.invoiceId && (<><dt>invoice</dt><dd className="truncate">{tx.paypal.invoiceNumber} · {tx.paypal.invoiceId}</dd></>)}
-      </dl>
-      <ol className="mt-2 space-y-1 border-l border-line pl-3">
-        {tx.events.slice(-5).map((e, i) => (
-          <li key={i} className="relative text-[11px]">
-            <span className={clsx("absolute -left-[15.5px] top-1 h-2 w-2 rounded-full", e.source === "paypal-webhook" ? "bg-accent" : "bg-[var(--border-strong)]")} />
-            <span className="text-ink/80">{e.type}</span>
-            {e.source === "paypal-webhook" && (
-              <span className="ml-1 inline-flex items-center gap-0.5 text-accent">
-                <Webhook size={10} /> webhook
-              </span>
-            )}
-            <span className="ml-1 text-faint">{new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-            {e.note && <div className="text-faint">{e.note}</div>}
-          </li>
-        ))}
-      </ol>
-      <div className="mt-2 flex flex-wrap gap-1.5">
+      <div className="flex items-end justify-between gap-2">
+        <div className="text-2xl font-semibold tabular-nums tracking-[-0.02em]">{money(Number(tx.amount))}</div>
+        <StatusPill status={tx.status} />
+      </div>
+      {tx.detail && <p className="text-xs leading-relaxed text-muted">{tx.detail}</p>}
+
+      <div className="flex flex-wrap gap-1.5">
         {tx.kind === "parts" && tx.status === "COMPLETED" && (
           <Button size="sm" variant="danger" disabled={!!busy} onClick={() => run("refund", () => commerce.refund(tx.id))}>
             {busy === "refund" ? "Refunding…" : "Cancel & refund"}
@@ -120,11 +77,11 @@ function TxCard({ tx }: { tx: Transaction }) {
         {tx.kind === "technician_invoice" && ["SENT", "UNPAID"].includes(tx.status) && (
           <>
             {tx.paypal.payerViewUrl && (
-              <a href={tx.paypal.payerViewUrl} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center gap-1 rounded-xl bg-[#ffc439] px-2.5 text-xs font-semibold text-[#111]">
+              <a href={tx.paypal.payerViewUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center gap-1 rounded-xl bg-[#ffc439] px-3 text-xs font-semibold text-[#111]">
                 Pay invoice <ExternalLink size={12} />
               </a>
             )}
-            <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => run("refresh", () => commerce.refreshInvoice(tx.id))}>
+            <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => run("refresh", () => commerce.refreshInvoice(tx.id))}>
               <RefreshCw size={12} className={busy === "refresh" ? "animate-spin" : ""} /> Refresh
             </Button>
             <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => run("cancel", () => commerce.cancelInvoice(tx.id))}>
@@ -133,9 +90,57 @@ function TxCard({ tx }: { tx: Transaction }) {
           </>
         )}
       </div>
-      {err && <div className="mt-1.5 text-xs text-danger">{err}</div>}
-    </li>
+      {err && <div className="text-xs text-danger">{err}</div>}
+
+      {!!ids.length && (
+        <section>
+          <h4 className="eyebrow mb-1.5">PayPal references</h4>
+          <dl className="divide-y divide-[var(--border)] rounded-xl border border-line">
+            {ids.map(([k, v]) => (
+              <div key={k} className="flex items-center justify-between gap-3 px-3 py-2">
+                <dt className="text-[11px] text-muted">{k}</dt>
+                <dd className="min-w-0 truncate font-mono text-[11px]">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      )}
+
+      <section>
+        <h4 className="eyebrow mb-2">Timeline</h4>
+        <ol className="space-y-2.5 border-l border-line pl-4">
+          {[...tx.events].reverse().map((e, i) => (
+            <li key={i} className="relative text-xs">
+              <span className={clsx("absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full ring-4 ring-[var(--surface-solid)]", e.source === "paypal-webhook" ? "bg-accent" : "bg-[var(--border-strong)]")} />
+              <div className="flex flex-wrap items-center gap-x-1.5">
+                <span className="font-medium text-ink/90">{e.type}</span>
+                {e.source === "paypal-webhook" && (
+                  <span className="inline-flex items-center gap-0.5 text-[11px] text-accent">
+                    <Webhook size={11} /> webhook
+                  </span>
+                )}
+                <span className="text-[11px] text-faint">{new Date(e.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+              </div>
+              {e.note && <div className="mt-0.5 text-faint">{e.note}</div>}
+            </li>
+          ))}
+        </ol>
+      </section>
+    </article>
   );
+}
+
+function totals(items: Transaction[]) {
+  const sum = (pred: (t: Transaction) => boolean) => {
+    const hits = items.filter(pred);
+    return { amount: hits.reduce((n, t) => n + Number(t.amount), 0), count: hits.length };
+  };
+  return [
+    { label: "Paid", ...sum((t) => t.status === "COMPLETED" || t.status === "CAPTURED" || t.status === "PAID"), tone: "var(--ok)" },
+    { label: "On hold", ...sum((t) => t.status === "AUTHORIZED"), tone: "var(--accent)" },
+    { label: "Awaiting payment", ...sum((t) => ["CREATED", "APPROVED", "SENT", "UNPAID"].includes(t.status)), tone: "var(--warn)" },
+    { label: "Refunded", ...sum((t) => t.status === "REFUNDED"), tone: "var(--muted)" },
+  ];
 }
 
 export function OrdersDrawer() {
@@ -143,35 +148,63 @@ export function OrdersDrawer() {
   const items = useOrders((s) => s.items);
   const setOpen = useOrders((s) => s.setOpen);
   const refresh = useOrders((s) => s.refresh);
+  const [picked, setPicked] = useState<string | null>(null);
   useEffect(() => {
     if (open) void refresh();
   }, [open, refresh]);
+  const stats = useMemo(() => totals(items), [items]);
   if (!open) return null;
+  const selected = items.find((t) => t.id === picked) ?? items[0];
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/25 backdrop-blur-[2px]" onClick={() => setOpen(false)}>
-      <aside className="glass m-3 flex w-full max-w-md flex-col overflow-hidden rounded-3xl" onClick={(e) => e.stopPropagation()} aria-label="Orders and bookings">
-        <header className="flex items-center gap-2 border-b border-line px-4 py-3">
-          <Receipt size={18} className="text-muted" />
-          <div>
-            <div className="text-sm font-semibold">Orders & bookings</div>
-            <div className="text-[11px] text-muted">PayPal sandbox · statuses update live from webhooks</div>
+    <Modal label="Orders and bookings" className="orders-dialog" onClose={() => setOpen(false)}>
+      <header className="flex shrink-0 items-center gap-3 border-b border-line px-5 py-3.5">
+        <span className="grid h-9 w-9 place-items-center rounded-xl bg-surface-3 text-ink"><Receipt size={18} strokeWidth={1.75} /></span>
+        <div className="min-w-0">
+          <h2 className="text-[15px] font-semibold tracking-[-0.01em]">Orders & bookings</h2>
+          <div className="flex items-center gap-1.5 text-[11px] text-muted">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#ffc439]" /> PayPal sandbox · statuses update live from PayPal
           </div>
-          <IconButton label="Close" className="ml-auto" onClick={() => setOpen(false)}>
-            <X size={16} />
-          </IconButton>
-        </header>
-        <ul className="scroll-thin flex-1 space-y-2.5 overflow-y-auto p-3">
-          {items.map((tx) => (
-            <TxCard key={tx.id} tx={tx} />
-          ))}
-          {!items.length && (
-            <li className="px-4 py-12 text-center text-sm text-muted">
-              Nothing yet. Ask the mechanic about a problem. Parts, shop reservations and technician visits you pay for with PayPal show up here.
-            </li>
-          )}
-        </ul>
-      </aside>
-    </div>
+        </div>
+        <IconButton label="Close orders" className="ml-auto" onClick={() => setOpen(false)}>
+          <X size={17} />
+        </IconButton>
+      </header>
+      {items.length ? (
+        <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
+          <dl className="grid shrink-0 grid-cols-2 gap-2 border-b border-line p-3 md:grid-cols-4 md:px-5">
+            {stats.map((s) => (
+              <div key={s.label} className="rounded-2xl border border-line bg-surface-2 px-3.5 py-2.5">
+                <dt className="flex items-center gap-1.5 text-[11px] font-medium text-muted">
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.tone }} /> {s.label}
+                </dt>
+                <dd className="mt-0.5 flex items-baseline gap-1.5">
+                  <span className="text-lg font-semibold tabular-nums tracking-[-0.02em]">{money(s.amount)}</span>
+                  <span className="text-[11px] text-faint">{s.count} {s.count === 1 ? "item" : "items"}</span>
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+            <div className="h-[280px] shrink-0 md:h-auto md:min-w-0 md:flex-1">
+              <OrdersLedger items={items} selectedId={selected?.id ?? null} onSelect={setPicked} />
+            </div>
+            {selected && (
+              <aside aria-label="Selected transaction" className="scroll-thin border-t border-line p-4 md:w-[340px] md:shrink-0 md:overflow-y-auto md:border-l md:border-t-0">
+                <TxDetail key={selected.id} tx={selected} />
+              </aside>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="grid flex-1 place-content-center gap-2 px-8 text-center">
+          <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-surface-3 text-muted"><Receipt size={22} strokeWidth={1.5} /></span>
+          <p className="text-sm font-medium">No orders yet</p>
+          <p className="max-w-sm text-[13px] text-muted">
+            Ask the mechanic about a problem. Parts, shop reservations and technician visits you pay for with PayPal show up here.
+          </p>
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -189,9 +222,9 @@ export function OrderToast() {
     <button
       type="button"
       onClick={() => setOpen(true)}
-      className="glass fixed left-1/2 top-20 z-40 flex -translate-x-1/2 items-center gap-2 rounded-2xl px-4 py-2.5 text-sm"
+      className="glass rise fixed left-1/2 top-20 z-40 flex -translate-x-1/2 items-center gap-2.5 rounded-2xl py-2 pl-2 pr-4 text-[13px] font-medium"
     >
-      <span className="grid h-6 w-6 place-items-center rounded-full bg-[#ffc439] text-[11px] font-bold text-[#003087]">P</span>
+      <span className="grid h-7 w-7 place-items-center rounded-xl bg-[#ffc439] text-[11px] font-bold text-[#003087]">P</span>
       {flash.text}
     </button>
   );

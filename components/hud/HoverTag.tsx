@@ -13,7 +13,7 @@ const DIY = ["", "Easy", "Basic tools", "Moderate", "Advanced", "Shop only"];
  * the 3D view or in the Systems list (then it docks beside the list).
  */
 export function HoverTag() {
-  const hovered = useScene((s) => s.hovered);
+  const hovered = useScene((s) => (s.hoverQuiet ? null : s.hovered));
   const carId = useScene((s) => s.carId);
   const selected = useScene((s) => s.selected);
   const ref = useRef<HTMLDivElement>(null);

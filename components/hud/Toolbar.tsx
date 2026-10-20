@@ -1,23 +1,22 @@
 "use client";
-import clsx from "clsx";
-import { Boxes, Combine, Gauge, RotateCw, ScanEye, Search, Undo2 } from "lucide-react";
-import { useEffect } from "react";
+import { Layers, RotateCw, ScanEye, Search, SlidersHorizontal, Table2, Undo2, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useScene, type Quality } from "@/lib/store/scene";
-import { IconButton } from "../ui";
+import { Button, IconButton, Modal } from "../ui";
 
-const QUALITIES: Quality[] = ["balanced", "high", "ultra"];
-
-export function Toolbar({ onSearch }: { onSearch: () => void }) {
+export function Toolbar({ onSearch, onBrowse }: { onSearch: () => void; onBrowse: () => void }) {
   const explode = useScene((s) => s.explode);
-  const explodeSystems = useScene((s) => s.explodeSystems);
   const xray = useScene((s) => s.xray);
   const autoRotate = useScene((s) => s.autoRotate);
   const quality = useScene((s) => s.quality);
+  const guideOpen = useScene((s) => s.guideOpen);
+  const [settings, setSettings] = useState(false);
+  const bar = useRef<HTMLElement>(null);
   const s = useScene.getState();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k" && !document.querySelector("dialog[open]")) {
         e.preventDefault();
         onSearch();
       }
@@ -26,54 +25,64 @@ export function Toolbar({ onSearch }: { onSearch: () => void }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onSearch]);
 
-  const fill = `${Math.round(explode * 100)}%`;
+  // When the toolbar floats over the studio, tell the camera how much of the canvas it covers.
+  useLayoutEffect(() => {
+    const el = bar.current;
+    const stage = el?.parentElement?.querySelector(".viewer-stage");
+    if (!el || !stage) return;
+    const update = () => {
+      if (getComputedStyle(el).position !== "absolute") return useScene.getState().setViewInset(0);
+      const covered = stage.getBoundingClientRect().bottom - el.getBoundingClientRect().top;
+      useScene.getState().setViewInset(Math.max(0, Math.round(covered + 8)));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, []);
+
+  const percent = Math.round(explode * 100);
   return (
-    <div className="glass pointer-events-auto flex max-w-full items-center gap-0.5 rounded-2xl p-1 sm:gap-1 sm:p-1.5">
-      <IconButton label="Reassemble" onClick={() => s.setExplode(0, null)} disabled={explode === 0}>
-        <Combine size={18} />
-      </IconButton>
-      <label className="hidden items-center gap-2 px-1 sm:flex">
-        <span className="sr-only">Disassembly</span>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.01}
-          value={explode}
-          onChange={(e) => s.setExplode(Number(e.target.value), explodeSystems)}
-          className="slider w-28 sm:w-40"
-          style={{ ["--fill" as string]: fill }}
-        />
-      </label>
-      <button
-        type="button"
-        onClick={() => s.setExplode(explode > 0.5 ? 0 : 1, null)}
-        className="flex h-9 items-center gap-1.5 rounded-xl bg-accent px-3 text-sm font-medium text-accent-ink transition hover:brightness-110"
-      >
-        <Boxes size={16} />
-        <span className="hidden sm:inline">{explode > 0.5 ? "Reassemble" : "Disassemble"}</span>
-      </button>
-      <div className="mx-0.5 h-6 w-px bg-[var(--border)] sm:mx-1" />
-      <IconButton label="X-ray body" active={xray} onClick={() => s.setXray(!xray)}>
-        <ScanEye size={18} />
-      </IconButton>
-      <IconButton label="Auto-rotate" className="max-sm:hidden" active={autoRotate} onClick={() => s.setAutoRotate(!autoRotate)}>
-        <RotateCw size={18} />
-      </IconButton>
-      <IconButton
-        label={`Render quality: ${quality}`}
-        onClick={() => s.setQuality(QUALITIES[(QUALITIES.indexOf(quality) + 1) % QUALITIES.length])}
-        className="w-auto gap-1 px-2"
-      >
-        <Gauge size={18} />
-        <span className={clsx("hidden text-xs font-medium capitalize sm:inline")}>{quality}</span>
-      </IconButton>
-      <IconButton label="Reset view" onClick={() => s.clearDiagnosis()}>
-        <Undo2 size={18} />
-      </IconButton>
-      <IconButton label="Search parts (Ctrl+K)" onClick={onSearch}>
-        <Search size={18} />
-      </IconButton>
-    </div>
+    <>
+      <nav ref={bar} className="viewer-toolbar" aria-label="Model controls">
+        <label className="assembly-control">
+          <span className="font-medium">Disassembly</span>
+          <input aria-label="Disassembly" aria-valuetext={percent === 0 ? "Fully assembled" : percent === 100 ? "Fully disassembled" : `${percent}% disassembled`} type="range" min={0} max={100} step={1} value={percent}
+            onChange={(e) => { s.setExplode(Number(e.target.value) / 100, null); s.setIsolate(null); s.resetView(); }}
+            className="slider w-full" style={{ ["--fill" as string]: `${percent}%` }} />
+          <output aria-hidden="true" className="text-right tabular-nums text-muted">{percent}%</output>
+        </label>
+        <span className="toolbar-divider" aria-hidden="true" />
+        <div className="viewer-actions">
+          <IconButton label="Browse car systems" onClick={onBrowse} className="xl:hidden"><Layers size={18} strokeWidth={1.75} /></IconButton>
+          <IconButton label="X-ray body" active={xray} onClick={() => s.setXray(!xray)}><ScanEye size={18} strokeWidth={1.75} /></IconButton>
+          <IconButton label="Reset view" onClick={() => s.clearDiagnosis()}><Undo2 size={18} strokeWidth={1.75} /></IconButton>
+          <IconButton label="Search parts (Ctrl+K)" onClick={onSearch}><Search size={18} strokeWidth={1.75} /></IconButton>
+          <IconButton label="Price guide" active={guideOpen} onClick={() => s.setGuideOpen(!guideOpen)}><Table2 size={18} strokeWidth={1.75} /></IconButton>
+          <IconButton label="View settings" onClick={() => setSettings(true)}><SlidersHorizontal size={18} strokeWidth={1.75} /></IconButton>
+        </div>
+      </nav>
+      {settings && (
+        <Modal label="View settings" className="settings-dialog" onClose={() => setSettings(false)}>
+          <header className="flex items-center justify-between border-b border-line px-5 py-3">
+            <h2 className="text-sm font-semibold">View settings</h2>
+            <IconButton label="Close view settings" onClick={() => setSettings(false)}><X size={18} /></IconButton>
+          </header>
+          <div className="space-y-5 p-5 text-sm">
+            <label className="flex items-center justify-between gap-3">
+              Render quality
+              <select aria-label="Render quality" value={quality} onChange={(e) => s.setQuality(e.target.value as Quality)} className="min-h-11 rounded-xl border border-line bg-surface-solid px-3">
+                <option value="balanced">Balanced</option><option value="high">High</option><option value="ultra">Ultra</option>
+              </select>
+            </label>
+            <p className="-mt-3 text-xs text-muted">Choose Balanced for smoother movement on phones and slower devices.</p>
+            <Button className="w-full justify-between" aria-pressed={autoRotate} onClick={() => s.setAutoRotate(!autoRotate)}>
+              <span className="flex items-center gap-2"><RotateCw size={16} /> Auto-rotate</span><span className="text-muted">{autoRotate ? "On" : "Off"}</span>
+            </Button>
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }

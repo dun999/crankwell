@@ -1,10 +1,10 @@
 "use client";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getCar, getPart } from "@/lib/cars";
 import { SYSTEM_META } from "@/lib/cars/types";
 import { useScene } from "@/lib/store/scene";
-import { money } from "../ui";
+import { IconButton, Modal, money } from "../ui";
 
 export function PartSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
   // Mounting fresh each time it opens resets the query and selection.
@@ -16,11 +16,16 @@ function SearchDialog({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState("");
   const [idx, setIdx] = useState(0);
   const input = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     const t = setTimeout(() => input.current?.focus(), 10);
     return () => clearTimeout(t);
   }, []);
+
+  useEffect(() => {
+    list.current?.querySelector(`[data-index="${idx}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [idx]);
 
   const results = useMemo(() => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
@@ -42,34 +47,34 @@ function SearchDialog({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-start justify-center bg-black/20 px-4 pt-[12vh] backdrop-blur-[2px]" onClick={onClose}>
-      <div className="glass w-full max-w-lg overflow-hidden rounded-2xl" role="dialog" aria-label="Search parts" onClick={(e) => e.stopPropagation()}>
+    <Modal label="Search parts" className="search-dialog" onClose={onClose}>
         <div className="flex items-center gap-2 border-b border-line px-4">
           <Search size={16} className="text-muted" />
           <input
             ref={input}
+            aria-label="Search parts or symptoms"
             value={q}
             onChange={(e) => {
               setQ(e.target.value);
               setIdx(0);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Escape") onClose();
-              if (e.key === "ArrowDown") setIdx((i) => Math.min(results.length - 1, i + 1));
-              if (e.key === "ArrowUp") setIdx((i) => Math.max(0, i - 1));
-              if (e.key === "Enter" && results[idx]) pick(results[idx].id);
+              if (e.nativeEvent.isComposing) return;
+              if (e.key === "ArrowDown") { e.preventDefault(); setIdx((i) => Math.max(0, Math.min(results.length - 1, i + 1))); }
+              if (e.key === "ArrowUp") { e.preventDefault(); setIdx((i) => Math.max(0, i - 1)); }
+              if (e.key === "Enter" && results[idx]) { e.preventDefault(); pick(results[idx].id); }
             }}
-            placeholder="Search parts or symptoms… e.g. “caliper”, “squeal”, “battery”"
-            className="h-12 w-full bg-transparent text-sm outline-none placeholder:text-faint"
+            placeholder="Search parts or symptoms…"
+            className="h-14 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
           />
-          <kbd className="rounded border border-line px-1.5 text-[10px] text-muted">Esc</kbd>
+          <IconButton label="Close search" onClick={onClose}><X size={18} /></IconButton>
         </div>
-        <ul className="scroll-thin max-h-[50vh] overflow-y-auto p-1.5">
+        <ul ref={list} className="scroll-thin max-h-[65dvh] overflow-y-auto p-1.5">
           {results.map((p, i) => (
             <li key={p.id}>
               <button
                 type="button"
-                onMouseEnter={() => setIdx(i)}
+                data-index={i}
                 onClick={() => pick(p.id)}
                 className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left ${i === idx ? "bg-surface-2" : ""}`}
               >
@@ -84,7 +89,6 @@ function SearchDialog({ onClose }: { onClose: () => void }) {
           ))}
           {!results.length && <li className="px-3 py-6 text-center text-sm text-muted">No parts match “{q}”.</li>}
         </ul>
-      </div>
-    </div>
+    </Modal>
   );
 }

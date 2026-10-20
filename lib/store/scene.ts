@@ -23,6 +23,8 @@ export interface SceneState {
   isolate: SystemId[] | null;
   selected: string | null;
   hovered: string | null;
+  /** Hover came from a list that already shows the details (no floating card) */
+  hoverQuiet: boolean;
   /** part id → diagnosis confidence 0..1 */
   highlights: Record<string, number>;
   focus: FocusRequest | null;
@@ -30,10 +32,10 @@ export interface SceneState {
   quality: Quality;
   autoRotate: boolean;
   progress: { done: number; total: number } | null;
-  /** Pixels on the right covered by the chat panel (desktop) */
-  rightInset: number;
-  /** Pixels at the bottom covered by the chat sheet (mobile) */
-  bottomInset: number;
+  /** AG Grid price guide docked under the 3D view */
+  guideOpen: boolean;
+  /** Pixels of the canvas covered by floating controls; the camera frames the model in the rest. */
+  viewInset: { bottom: number };
 
   setCar: (id: CarId) => void;
   setExplode: (v: number, systems?: SystemId[] | null) => void;
@@ -41,7 +43,7 @@ export interface SceneState {
   toggleSystem: (s: SystemId) => void;
   setIsolate: (s: SystemId[] | null) => void;
   select: (id: string | null) => void;
-  hover: (id: string | null) => void;
+  hover: (id: string | null, quiet?: boolean) => void;
   setHighlights: (h: Record<string, number>) => void;
   focusParts: (ids: string[], cinematic?: boolean) => void;
   resetView: () => void;
@@ -49,8 +51,8 @@ export interface SceneState {
   setQuality: (q: Quality) => void;
   setAutoRotate: (v: boolean) => void;
   setProgress: (p: { done: number; total: number } | null) => void;
-  setRightInset: (px: number) => void;
-  setBottomInset: (px: number) => void;
+  setGuideOpen: (v: boolean) => void;
+  setViewInset: (bottom: number) => void;
 }
 
 export const useScene = create<SceneState>((set) => ({
@@ -62,14 +64,15 @@ export const useScene = create<SceneState>((set) => ({
   isolate: null,
   selected: null,
   hovered: null,
+  hoverQuiet: false,
   highlights: {},
   focus: null,
   resetNonce: 0,
-  quality: "high",
+  quality: typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches ? "balanced" : "high",
   autoRotate: false,
   progress: null,
-  rightInset: 0,
-  bottomInset: 0,
+  guideOpen: false,
+  viewInset: { bottom: 0 },
 
   setCar: (carId) =>
     set((s) =>
@@ -82,8 +85,8 @@ export const useScene = create<SceneState>((set) => ({
   toggleSystem: (sys) =>
     set((s) => ({ hiddenSystems: s.hiddenSystems.includes(sys) ? s.hiddenSystems.filter((x) => x !== sys) : [...s.hiddenSystems, sys] })),
   setIsolate: (isolate) => set({ isolate }),
-  select: (selected) => set({ selected }),
-  hover: (hovered) => set((s) => (s.hovered === hovered ? s : { hovered })),
+  select: (selected) => set({ selected, hovered: null }),
+  hover: (hovered, quiet = false) => set((s) => (s.hovered === hovered && s.hoverQuiet === quiet ? s : { hovered, hoverQuiet: quiet })),
   setHighlights: (highlights) => set({ highlights }),
   focusParts: (ids, cinematic = true) => set((s) => ({ focus: { ids, cinematic, nonce: (s.focus?.nonce ?? 0) + 1 } })),
   resetView: () => set((s) => ({ resetNonce: s.resetNonce + 1, focus: null })),
@@ -91,6 +94,6 @@ export const useScene = create<SceneState>((set) => ({
   setQuality: (quality) => set({ quality }),
   setAutoRotate: (autoRotate) => set({ autoRotate }),
   setProgress: (progress) => set({ progress }),
-  setRightInset: (rightInset) => set({ rightInset }),
-  setBottomInset: (bottomInset) => set({ bottomInset }),
+  setGuideOpen: (guideOpen) => set({ guideOpen }),
+  setViewInset: (bottom) => set((s) => (s.viewInset.bottom === bottom ? s : { viewInset: { bottom } })),
 }));

@@ -44,12 +44,19 @@ try {
     const resources = performance.getEntriesByType("resource");
     const initial = resources.filter((entry) => initialScripts.includes(entry.name));
     const local = resources.filter((entry) => new URL(entry.name).origin === location.origin);
+    const brand = local.filter((entry) => entry.name.includes("crankwell-mark") || entry.name.includes("crankwell-logo"));
+    const canvas = document.querySelector("canvas");
     return {
       initialJavaScript: {
         decodedBytes: initial.reduce((sum, entry) => sum + entry.decodedBodySize, 0),
         transferredBytes: initial.reduce((sum, entry) => sum + entry.transferSize, 0),
       },
       localResourceBytes: local.reduce((sum, entry) => sum + entry.decodedBodySize, 0),
+      brandImages: {
+        decodedBytes: brand.reduce((sum, entry) => sum + entry.decodedBodySize, 0),
+        transferredBytes: brand.reduce((sum, entry) => sum + entry.transferSize, 0),
+      },
+      canvasPixels: canvas ? canvas.width * canvas.height : 0,
       idle: {
         durationMs: Math.round(performance.now() - start.time),
         frames: window.__renderBenchmark.frames - start.frames,

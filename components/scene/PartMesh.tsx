@@ -71,7 +71,7 @@ function PartMeshImpl({ built, materials, xray, glow, assemblies }: Props) {
     g.position.set(part.position[0] + off.x, part.position[1] + off.y, part.position[2] + off.z);
     if (!hidden && !ghost) gl.shadowMap.needsUpdate = true;
     if (t.current !== target) invalidate();
-  });
+  }, -1);
 
   const onOver = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();

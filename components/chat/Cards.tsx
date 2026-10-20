@@ -59,15 +59,15 @@ export function DiagnosisCard({ e }: { e: Diagnosis }) {
   const drive = DRIVE[e.driveSafety];
   const ranked = [...e.suspects].sort((a, b) => b.confidence - a.confidence);
   return (
-    <div className="overflow-hidden rounded-2xl border border-line bg-surface-solid/70">
-      <div className="flex items-center gap-2 border-b border-line px-3 py-2">
+    <div className="rise overflow-hidden rounded-2xl border border-line bg-surface-solid shadow-[var(--shadow-sm)]">
+      <div className="flex items-center gap-2 border-b border-line bg-surface-2/60 px-3.5 py-2.5">
         <ClipboardCheck size={15} className="text-accent" />
         <span className="text-[13px] font-semibold">{e.title}</span>
         <span className="ml-auto rounded-full px-2 py-0.5 text-[10.5px] font-semibold" style={{ color: sev.color, background: `color-mix(in srgb, ${sev.color} 12%, transparent)` }}>
           {sev.label}
         </span>
       </div>
-      <div className="space-y-2.5 p-3">
+      <div className="space-y-3 p-3.5">
         <div className={clsx("flex items-start gap-2 rounded-xl border px-2.5 py-2 text-xs font-medium", drive.cls)}>
           <drive.icon size={14} className="mt-px shrink-0" /> {drive.text}
         </div>
@@ -113,8 +113,8 @@ export function SafetyTestCard({ e, msgId, blockIdx, answers, submitted }: { e: 
   const streaming = useChat((s) => s.streaming);
   const answered = Object.keys(answers ?? {}).length;
   return (
-    <div className="overflow-hidden rounded-2xl border border-line bg-surface-solid/70">
-      <div className="flex items-center gap-2 border-b border-line px-3 py-2">
+    <div className="rise overflow-hidden rounded-2xl border border-line bg-surface-solid shadow-[var(--shadow-sm)]">
+      <div className="flex items-center gap-2 border-b border-line bg-surface-2/60 px-3.5 py-2.5">
         <ShieldCheck size={15} className="text-ok" />
         <span className="text-[13px] font-semibold">Safe checks to confirm</span>
         <span className="ml-auto text-[11px] text-muted">
@@ -190,8 +190,8 @@ const URGENCY = { now: "Do this now", soon: "Within a few days", when_convenient
 export function RecommendationsCard({ e }: { e: Recs }) {
   const [open, setOpen] = useState(0);
   return (
-    <div className="overflow-hidden rounded-2xl border border-line bg-surface-solid/70">
-      <div className="border-b border-line px-3 py-2 text-[13px] font-semibold">{e.headline}</div>
+    <div className="rise overflow-hidden rounded-2xl border border-line bg-surface-solid shadow-[var(--shadow-sm)]">
+      <div className="border-b border-line bg-surface-2/60 px-3.5 py-2.5 text-[13px] font-semibold">{e.headline}</div>
       <ul className="divide-y divide-[var(--border)]">
         {e.actions.map((a, i) => (
           <ActionRow key={i} a={a} carId={e.carId} open={open === i} onToggle={() => setOpen(open === i ? -1 : i)} />
@@ -205,8 +205,8 @@ function ActionRow({ a, carId, open, onToggle }: { a: RecommendedAction; carId: 
   const M = ACTION_META[a.type];
   return (
     <li>
-      <button type="button" onClick={onToggle} className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left hover:bg-surface-2/60">
-        <span className={clsx("grid h-8 w-8 shrink-0 place-items-center rounded-xl", a.urgency === "now" ? "bg-danger/12 text-danger" : "bg-accent-soft text-accent")}>
+      <button type="button" onClick={onToggle} className="flex w-full items-start gap-3 px-3.5 py-3 text-left transition-colors hover:bg-surface-2">
+        <span className={clsx("grid h-8 w-8 shrink-0 place-items-center rounded-[10px]", a.urgency === "now" ? "bg-danger/10 text-danger" : "bg-surface-3 text-ink")}>
           <M.icon size={16} />
         </span>
         <span className="min-w-0 flex-1">
@@ -223,7 +223,7 @@ function ActionRow({ a, carId, open, onToggle }: { a: RecommendedAction; carId: 
         <ChevronDown size={15} className={clsx("mt-1 text-muted transition", open && "rotate-180")} />
       </button>
       {open && (
-        <div className="space-y-2 px-3 pb-3 text-xs">
+        <div className="space-y-2.5 px-3.5 pb-3.5 text-xs">
           <p className="text-muted">{a.why}</p>
           {a.type === "diy" && (
             <>

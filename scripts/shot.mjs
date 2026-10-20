@@ -58,7 +58,8 @@ if (hover) {
     });
     const c = camera.position.clone().set((box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2);
     c.project(camera);
-    return { x: (c.x * 0.5 + 0.5) * size.width, y: (-c.y * 0.5 + 0.5) * size.height };
+    const canvas = document.querySelector("canvas").getBoundingClientRect();
+    return { x: canvas.left + (c.x * 0.5 + 0.5) * size.width, y: canvas.top + (-c.y * 0.5 + 0.5) * size.height };
   }, hover);
   if (pt) {
     await page.mouse.move(pt.x - 30, pt.y - 30);

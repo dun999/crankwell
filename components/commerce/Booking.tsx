@@ -17,7 +17,7 @@ export function ShopReserve({ shop, carId, partId, issue }: { shop: RepairShop; 
   const setOrdersOpen = useOrders((s) => s.setOpen);
   const location = useChat((s) => s.location);
   return (
-    <div className="space-y-2 rounded-xl border border-line bg-surface-solid/60 p-2.5 text-xs">
+    <div className="space-y-2 rounded-2xl border border-line bg-surface-2/70 p-3 text-xs">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="font-semibold">{shop.name}</div>
@@ -103,7 +103,7 @@ export function TechnicianBook({
   const hours = estimate ? Math.max(1, Math.round((estimate.max - tech.calloutFee) / tech.hourlyRate / 2)) : 1;
 
   return (
-    <div className="space-y-2 rounded-xl border border-line bg-surface-solid/60 p-2.5 text-xs">
+    <div className="space-y-2 rounded-2xl border border-line bg-surface-2/70 p-3 text-xs">
       <div className="flex items-center gap-2.5">
         <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-agent-soft text-[12px] font-semibold text-agent">{tech.initials}</div>
         <div className="min-w-0 flex-1">

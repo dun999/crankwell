@@ -1,15 +1,72 @@
 "use client";
 import { Environment, Grid, Lightformer, MeshReflectorMaterial } from "@react-three/drei";
+import { useFrame } from "@react-three/fiber";
+import { useEffect, useMemo, useRef } from "react";
+import * as THREE from "three";
 import type { Quality } from "@/lib/store/scene";
+import type { BuiltCar, BuiltPart } from "@/lib/three/assemble";
+
+/** Canvas clear colors. After neutral tone mapping they match --bg in globals.css, so the studio has no visible edge. */
+export const STUDIO_BG = { light: "#fbfcff", dark: "#2c2d2f" };
+
+/** Soft pool of light under the car, fading to transparent. */
+function useSpotTexture(dark: boolean) {
+  const texture = useMemo(() => {
+    const size = 256;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext("2d")!;
+    const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    const [r, gr, b] = dark ? [38, 41, 47] : [255, 255, 255];
+    g.addColorStop(0, `rgba(${r},${gr},${b},${dark ? 0.7 : 0.8})`);
+    g.addColorStop(0.45, `rgba(${r},${gr},${b},${dark ? 0.3 : 0.35})`);
+    g.addColorStop(1, `rgba(${r},${gr},${b},0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+    const t = new THREE.CanvasTexture(canvas);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }, [dark]);
+  useEffect(() => () => texture.dispose(), [texture]);
+  return texture;
+}
 
 /** Studio built entirely from local light-formers: no HDRI download. */
-export function Studio({ dark, quality }: { dark: boolean; quality: Quality }) {
-  const bg = dark ? "#0b0d11" : "#e9ecf0";
+export function Studio({ dark, quality, built }: { dark: boolean; quality: Quality; built: BuiltCar | null }) {
+  const bg = dark ? STUDIO_BG.dark : STUDIO_BG.light;
   const envBg = dark ? "#07080a" : "#c9ced6";
+  const spot = useSpotTexture(dark);
+  const floor = useRef<THREE.Group>(null);
+  const tracked = useRef<{ car: THREE.Object3D; built: BuiltCar; parts: { node: THREE.Object3D; part: BuiltPart }[] } | null>(null);
+
+  // Run after the part animations (-1). Use their actual positions so the
+  // ground never clips descending parts or rises through them on reassembly.
+  useFrame(({ scene, gl }) => {
+    if (!floor.current) return;
+    const car = built && scene.getObjectByName(`car-${built.id}`);
+    let y = 0;
+    if (car && built) {
+      if (tracked.current?.car !== car || tracked.current.built !== built) {
+        const parts: { node: THREE.Object3D; part: BuiltPart }[] = [];
+        car.traverse((node) => {
+          const part = built.byId.get(node.userData.partId);
+          if (part) parts.push({ node, part });
+        });
+        tracked.current = { car, built, parts };
+      }
+      for (const { node, part } of tracked.current.parts) {
+        y = Math.min(y, part.box.min.y + node.position.y - part.part.position[1] - 0.01);
+      }
+    }
+    if (floor.current.position.y !== y) {
+      floor.current.position.y = y;
+      gl.shadowMap.needsUpdate = true;
+    }
+  }, -0.5);
   return (
     <>
       <color attach="background" args={[bg]} />
-      <fog attach="fog" args={[bg, 22, 48]} />
+      <fog attach="fog" args={[bg, 24, 60]} />
       <ambientLight intensity={dark ? 0.08 : 0.1} />
       <directionalLight
         position={[2.5, 9, 3]}
@@ -43,9 +100,10 @@ export function Studio({ dark, quality }: { dark: boolean; quality: Quality }) {
         <Lightformer form="circle" intensity={dark ? 1.5 : 2} position={[0, -3, 0]} rotation-x={-Math.PI / 2} scale={6} color={dark ? "#1b2230" : "#f5f6f8"} />
       </Environment>
 
+      <group ref={floor} name="studio-floor">
       {quality === "ultra" ? (
         <mesh rotation-x={-Math.PI / 2} position={[0, 0, 0]} receiveShadow>
-          <circleGeometry args={[18, 64]} />
+          <circleGeometry args={[60, 96]} />
           <MeshReflectorMaterial
             resolution={1024}
             mirror={dark ? 0.55 : 0.35}
@@ -57,28 +115,36 @@ export function Studio({ dark, quality }: { dark: boolean; quality: Quality }) {
             maxDepthThreshold={1.2}
             roughness={0.85}
             metalness={0.2}
-            color={dark ? "#0d0f13" : "#d9dde3"}
+            color={dark ? "#0d0f13" : "#e4e7eb"}
           />
         </mesh>
       ) : (
-        <mesh rotation-x={-Math.PI / 2} position={[0, 0, 0]} receiveShadow>
-          <circleGeometry args={[18, 64]} />
-          <meshStandardMaterial color={dark ? "#11141a" : "#c3c8cf"} roughness={0.92} metalness={0} envMapIntensity={dark ? 0.4 : 0.12} />
-        </mesh>
+        <>
+          {/* Shadow catcher: the floor takes the background color, so only shadows and the light pool show. */}
+          <mesh rotation-x={-Math.PI / 2} position={[0, 0, 0]} receiveShadow>
+            <planeGeometry args={[80, 80]} />
+            <shadowMaterial transparent opacity={dark ? 0.45 : 0.2} color={dark ? "#000000" : "#1e293b"} />
+          </mesh>
+          <mesh rotation-x={-Math.PI / 2} position={[0, 0.002, 0]} renderOrder={-1}>
+            <circleGeometry args={[8.5, 64]} />
+            <meshBasicMaterial map={spot} transparent depthWrite={false} fog={false} toneMapped={false} />
+          </mesh>
+        </>
       )}
       <Grid
         position={[0, 0.004, 0]}
         args={[30, 30]}
         cellSize={0.25}
-        cellThickness={0.6}
-        cellColor={dark ? "#1c2230" : "#c3c8d0"}
+        cellThickness={0.5}
+        cellColor={dark ? "#1a1d23" : "#dde1e7"}
         sectionSize={1}
-        sectionThickness={1}
-        sectionColor={dark ? "#26324a" : "#aab1bb"}
-        fadeDistance={16}
-        fadeStrength={1.6}
+        sectionThickness={0.9}
+        sectionColor={dark ? "#252a33" : "#cbd1d9"}
+        fadeDistance={15}
+        fadeStrength={1.8}
         infiniteGrid
       />
+      </group>
       <hemisphereLight args={[dark ? "#2a3550" : "#ffffff", dark ? "#050608" : "#cfd4dc", dark ? 0.2 : 0.18]} />
     </>
   );

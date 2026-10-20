@@ -90,6 +90,15 @@ Everything is built in code (`lib/three/`): no downloaded models, no HDRIs, roug
 - **Disassembly:** staged and animated. The body comes off first, then wheels and brakes, suspension, and finally the powertrain lifts out and the engine internals separate.
 - **Rendering:** clearcoat flake paint, transmissive lenses, procedural normal maps, a studio built from light-formers, VSM soft shadows, N8AO, bloom on the LEDs, an outline on hover, and light and dark studio themes.
 
+## AG Grid
+
+Two views use AG Grid Community (`ag-grid-community` + `ag-grid-react` v36). Both load only when opened, so they add nothing to the first page load.
+
+- **Price guide** (`components/hud/PriceGuide.tsx`): every part of the car on screen with part price, shop labor, typical repair total, DIY difficulty and lifespan. Quick filter searches names *and* failure symptoms ("brake light out" finds the tail lamps); an external filter narrows by system or to parts sold in the store. The grid drives the 3D view: hovering a row outlines that part on the car, clicking flies the camera to it and opens its details, and selecting a part anywhere else (3D click, search, the agent's diagnosis) selects and scrolls to its row.
+- **Orders ledger** (`components/commerce/OrdersLedger.tsx`): every PayPal order, shop deposit and invoice with live status (webhook-pushed rows are marked), the current PayPal reference (capture, authorization, refund or invoice), and totals for paid, on hold, awaiting payment and refunded. Selecting a row opens its timeline and the actions PayPal allows next: refund, capture or void the deposit, pay or cancel the invoice.
+
+The theme (`components/grid/theme.ts`) is Quartz with the app's CSS variables, so the grids follow light and dark mode, and registers only the community modules the two grids use. Columns adapt to the grid's width, down to part + total on a phone.
+
 ## Scripts
 
 ```bash
@@ -107,7 +116,8 @@ app/api/paypal/*         orders, capture, authorize, deposit capture/void, refun
 app/api/events           live transaction updates (SSE)
 components/scene         R3F canvas, studio, part meshes, camera rig
 components/chat          sidebar + diagnosis / safety-test / recommendation cards
-components/commerce      PayPal button, parts shop, shop reservation, technician invoice, orders drawer
+components/commerce      PayPal button, parts shop, shop reservation, technician invoice, orders drawer + AG Grid ledger
+components/grid          AG Grid theme and module registration
 lib/cars                 car specs, part templates (notes + prices), layout generator
 lib/three                body surface, materials, procedural textures, part builders
 lib/agent                prompt, tools, loop
