@@ -93,6 +93,16 @@ const schemas = {
       .min(1)
       .max(5),
   }),
+  show_parts: z.object({
+    car_id: CarIdS,
+    part_ids: z.array(z.string()).min(1).max(3).describe("The part(s) to replace, most likely fix first. Usually one."),
+    headline: z.string().max(90).describe("e.g. 'Batteries that fit your Corolla'"),
+    pick_tier: z.enum(["Value", "OE-Equivalent", "Performance"]).optional().describe("The tier you recommend for this job (default OE-Equivalent)"),
+    note: z.string().max(200).optional().describe("One short line on which to choose and why"),
+  }),
+  suggest_replies: z.object({
+    replies: z.array(z.string().min(2).max(60)).min(2).max(4).describe("Short replies in the user's voice, the one you recommend first"),
+  }),
   prepare_action: PrepareActionS,
   get_orders: z.object({}),
 } as const;
@@ -109,7 +119,11 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   request_safety_tests:
     "Show a checklist of SAFE checks the user can do to tell the suspects apart (visual, listening, engine-off or idling in Park, walking-pace roll in an empty lot at most). The user's answers arrive as their next message.",
   get_part_info: "Look up a part: purpose, typical price range, DIY difficulty, common failure symptoms, whether it is sold in the parts store.",
-  search_spare_parts: "List purchasable SKUs (Value / OE-Equivalent / Performance) with prices for a part. Use before recommending buy_part.",
+  search_spare_parts: "List purchasable SKUs (Value / OE-Equivalent / Performance) with prices for a part, without showing them. show_parts already includes this.",
+  show_parts:
+    "Show a parts card: every SKU for the part(s) with price, warranty and shipping, each with a Buy button. Buy opens PayPal sandbox checkout in the chat, then a receipt with live payment status. Use it when the user wants parts or accepts your offer to find them. Don't call prepare_action for parts shown here; the user buys from the card.",
+  suggest_replies:
+    "Show tappable reply chips under your message so the user can answer in one tap. Call it last, after writing your message: it ends your turn.",
   find_repair_shops: "Find nearby repair shops for a specialty with rating, distance, labor rate, deposit and open slots. Use before recommending reserve_shop.",
   find_technicians: "Find mobile technicians who can come to the car, with call-out fee, hourly rate and ETA. Use before recommending book_technician.",
   recommend_actions:
@@ -119,16 +133,19 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   get_orders: "Get the user's PayPal orders, shop reservations and technician invoices with their current status, plus anything still waiting for their confirmation.",
 };
 
+/** What the user sees while a tool runs. */
 export const TOOL_LABELS: Record<ToolName, string> = {
-  show_diagnosis: "Ranking likely causes",
-  focus_parts: "Pointing at parts on the 3D model",
-  request_safety_tests: "Preparing safe checks",
-  get_part_info: "Looking up part details",
-  search_spare_parts: "Checking parts prices",
+  show_diagnosis: "Analyzing your car",
+  focus_parts: "Pointing at the part on your car",
+  request_safety_tests: "Preparing a few safe checks",
+  get_part_info: "Looking up the part",
+  search_spare_parts: "Comparing parts prices",
+  show_parts: "Finding good prices on parts",
   find_repair_shops: "Finding repair shops nearby",
-  find_technicians: "Finding mobile technicians",
+  find_technicians: "Finding mobile mechanics",
   recommend_actions: "Putting together your options",
-  prepare_action: "Preparing your checkout",
+  suggest_replies: "Wrapping up",
+  prepare_action: "Preparing your PayPal sandbox checkout",
   get_orders: "Checking your PayPal orders",
 };
 
@@ -304,6 +321,27 @@ async function exec(name: ToolName, input: unknown, ctx: ToolContext): Promise<u
       const actions = buildRecommendations(a.car_id, a.actions, loc);
       ctx.emit({ type: "recommendations", carId: a.car_id, headline: a.headline, actions });
       return { shown: actions.length, note: "The user can pay or book directly from these cards via PayPal." };
+    }
+    case "show_parts": {
+      const a = schemas.show_parts.parse(input);
+      const groups = a.part_ids
+        .map((id) => requirePart(a.car_id, id))
+        .map((p) => ({ part: { id: p.id, name: p.name }, skus: getSpareParts(a.car_id, p.id) }))
+        .filter((g) => g.skus.length);
+      if (!groups.length) throw new ToolInputError("None of these parts are sold in the parts store. Offer a repair shop instead (find_repair_shops, then recommend_actions).");
+      const first = groups[0].skus;
+      const pick = first.find((x) => x.tier === (a.pick_tier ?? "OE-Equivalent") && x.inStock) ?? first.find((x) => x.inStock);
+      ctx.emit({ type: "parts", carId: a.car_id, headline: a.headline, note: a.note, groups, pick: pick?.sku });
+      return {
+        shown: groups.map((g) => ({ part: g.part.name, skus: g.skus.map(skuBrief) })),
+        pick: pick?.sku,
+        note: "The user buys with the Buy button: PayPal sandbox checkout, receipt and live status appear in the chat. Don't call prepare_action for these unless they ask you to in chat.",
+      };
+    }
+    case "suggest_replies": {
+      const a = schemas.suggest_replies.parse(input);
+      ctx.emit({ type: "replies", replies: a.replies });
+      return { shown: true };
     }
     case "prepare_action": {
       const a = schemas.prepare_action.parse(input);

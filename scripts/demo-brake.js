@@ -22,7 +22,6 @@
   window.__chat.setState({ messages: [
     { id: "u1", role: "user", blocks: [{ kind: "text", text: "My brake isn't working properly. The pedal feels soft and sinks." }] },
     { id: "a1", role: "assistant", blocks: [
-      { kind: "progress", text: "Soft and sinking points to the hydraulic side. Pulling up the master cylinder and lines." },
       { kind: "tool", id: "t1", name: "show_diagnosis", label: "Ranking likely causes", status: "done" },
       { kind: "ui", event: diag },
       { kind: "text", text: "**Please don't drive the car** until this is checked. A sinking pedal can mean the brakes won't stop you.\n\nI've highlighted the four most likely culprits on the model. The checks below are safe to do in your driveway and help narrow it down." },

@@ -1,6 +1,6 @@
 "use client";
 import clsx from "clsx";
-import { ArrowUp, AudioWaveform, BatteryWarning, CreditCard, Disc3, Loader2, LocateFixed, MessageSquareText, PanelRightClose, ScanSearch, ShieldCheck, Square, SquarePen, ThermometerSun } from "lucide-react";
+import { ArrowUp, AudioWaveform, BatteryWarning, CreditCard, Disc3, LocateFixed, MessageSquareText, PanelRightClose, ScanSearch, ShieldCheck, Square, SquarePen, ThermometerSun } from "lucide-react";
 import { memo, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
@@ -9,12 +9,16 @@ import { CAR_SPECS } from "@/lib/cars/specs";
 import { useChat, type Block, type ChatMessage } from "@/lib/store/chat";
 import { useScene } from "@/lib/store/scene";
 import { IconButton } from "../ui";
+import { AgentWorking, StepsSummary } from "./Working";
 const ReactMarkdown = dynamic(() => import("react-markdown"), { loading: () => <span className="text-muted">Loading message…</span> });
 const DiagnosisCard = dynamic(() => import("./Cards").then((m) => m.DiagnosisCard));
 const FocusLine = dynamic(() => import("./Cards").then((m) => m.FocusLine));
 const RecommendationsCard = dynamic(() => import("./Cards").then((m) => m.RecommendationsCard));
 const SafetyTestCard = dynamic(() => import("./Cards").then((m) => m.SafetyTestCard));
+const PartsCard = dynamic(() => import("./Cards").then((m) => m.PartsCard));
+const Replies = dynamic(() => import("./Cards").then((m) => m.Replies));
 const ConfirmCard = dynamic(() => import("./ConfirmCard").then((m) => m.ConfirmCard));
+const PreparingCheckout = dynamic(() => import("./Checkout").then((m) => m.PreparingCheckout));
 
 const SUGGESTIONS = [
   { label: "Soft brake pedal", message: "My brake isn't working properly. The pedal feels soft", icon: Disc3 },
@@ -116,7 +120,7 @@ export function ChatSidebar() {
       }} className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-3.5 py-3.5">
         {!messages.length && <Welcome onPick={(s) => send(s)} />}
         {messages.map((m, i) => (
-          <Message key={m.id} message={m} streaming={streaming && i === messages.length - 1} />
+          <Message key={m.id} message={m} last={i === messages.length - 1} streaming={streaming && i === messages.length - 1} />
         ))}
       </div>
 
@@ -197,19 +201,11 @@ function Welcome({ onPick }: { onPick: (s: string) => void }) {
   );
 }
 
-function Thinking({ blocks }: { blocks: Block[] }) {
-  const last = blocks[blocks.length - 1];
-  if (last?.kind === "text" && last.text.length) return null;
-  const running = [...blocks].reverse().find((b) => b.kind === "tool" && b.status === "running") as Extract<Block, { kind: "tool" }> | undefined;
-  return (
-    <div className="flex items-center gap-2 px-0.5 text-xs text-muted">
-      <Loader2 size={13} className="animate-spin text-agent" />
-      <span className="shimmer font-medium">{running ? running.label : "Thinking…"}</span>
-    </div>
-  );
-}
+// Offered after a diagnosis when the mechanic didn't suggest its own next steps.
+const NEXT_STEPS = ["Find parts at a good price", "Quick check first", "Find a mechanic nearby"];
+const INTERACTIVE = new Set(["replies", "parts", "recommendations", "action", "safety_tests"]);
 
-const Message = memo(function Message({ message: m, streaming }: { message: ChatMessage; streaming: boolean }) {
+const Message = memo(function Message({ message: m, last, streaming }: { message: ChatMessage; last: boolean; streaming: boolean }) {
   if (m.role === "user") return (
     <div className="flex justify-end">
       <div className="rise max-w-[85%] whitespace-pre-wrap rounded-xl rounded-br-sm bg-surface-3 px-3 py-1.5 text-[13px] leading-relaxed text-ink">
@@ -217,10 +213,14 @@ const Message = memo(function Message({ message: m, streaming }: { message: Chat
       </div>
     </div>
   );
+  const ui = m.blocks.flatMap((b) => (b.kind === "ui" ? [b.event] : []));
+  const offered = ui.findLast((e) => e.type === "replies");
+  const replies = offered?.type === "replies" ? offered.replies : ui.some((e) => e.type === "diagnosis") && !ui.some((e) => INTERACTIVE.has(e.type)) ? NEXT_STEPS : null;
   return (
     <div className="space-y-2.5">
+      {!streaming && <StepsSummary blocks={m.blocks} ms={m.ms} />}
       {m.blocks.map((b, i) => <AssistantBlock key={i} b={b} msgId={m.id} idx={i} />)}
-      {streaming && <Thinking blocks={m.blocks} />}
+      {streaming ? <AgentWorking blocks={m.blocks} startedAt={m.startedAt} /> : last && replies && <Replies replies={replies} />}
     </div>
   );
 });
@@ -233,19 +233,10 @@ const AssistantBlock = memo(function AssistantBlock({ b, msgId, idx }: { b: Bloc
           <ReactMarkdown>{b.text}</ReactMarkdown>
         </div>
       );
-    case "progress":
-      return <div className="border-l border-agent/60 pl-2.5 text-xs italic text-muted">{b.text}</div>;
-    case "tool":
-      return b.status === "running" ? null : (
-        <div className="mono flex items-center gap-1.5 border-l border-line-strong py-0.5 pl-2.5 text-[10.5px] text-faint" title={b.label}>
-          <span className={b.status === "error" ? "text-danger" : "text-ok"}>{b.status === "error" ? "✕" : "▸"}</span>
-          <span className="text-muted">{b.name}</span>
-          <span className="min-w-0 truncate">· {b.label}</span>
-          {b.ms !== undefined && <span className="ml-auto shrink-0 pl-2 tabular-nums">{b.ms < 1000 ? `${b.ms}ms` : `${(b.ms / 1000).toFixed(1)}s`}</span>}
-        </div>
-      );
     case "error":
       return <div className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{b.text}</div>;
+    case "checkout":
+      return <PreparingCheckout b={b} msgId={msgId} idx={idx} />;
     case "ui":
       switch (b.event.type) {
         case "focus":
@@ -256,9 +247,12 @@ const AssistantBlock = memo(function AssistantBlock({ b, msgId, idx }: { b: Bloc
           return <SafetyTestCard e={b.event} msgId={msgId} blockIdx={idx} answers={b.answers} submitted={b.submitted} />;
         case "recommendations":
           return <RecommendationsCard e={b.event} />;
+        case "parts":
+          return <PartsCard e={b.event} />;
         case "action":
           return <ConfirmCard e={b.event} />;
       }
   }
+  // Tool steps live in the summary line; replies render after the message.
   return null;
 });

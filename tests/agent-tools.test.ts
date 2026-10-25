@@ -51,6 +51,26 @@ describe("agent tools", () => {
     expect(events).toHaveLength(0);
   });
 
+  it("show_parts emits every SKU with the mechanic's pick and refuses parts the store doesn't sell", async () => {
+    const { events, ctx: c } = ctx();
+    const r = await runTool("show_parts", { car_id: "corolla", part_ids: ["electrical.battery"], headline: "Batteries", pick_tier: "Value" }, c);
+    expect(r.isError).toBeFalsy();
+    const e = events[0] as Extract<UiEvent, { type: "parts" }>;
+    expect(e.groups[0].part.id).toBe("electrical.battery");
+    expect(e.groups[0].skus.map((s) => s.tier)).toEqual(["Value", "OE-Equivalent", "Performance"]);
+    expect(e.pick).toBe(e.groups[0].skus[0].sku);
+    const none = await runTool("show_parts", { car_id: "corolla", part_ids: ["engine.block"], headline: "h" }, c);
+    expect(none.isError).toBe(true);
+    expect(events).toHaveLength(1);
+  });
+
+  it("suggest_replies emits reply chips", async () => {
+    const { events, ctx: c } = ctx();
+    const r = await runTool("suggest_replies", { replies: ["Yes, find me a battery", "Quick check first"] }, c);
+    expect(r.isError).toBeFalsy();
+    expect(events).toEqual([{ type: "replies", replies: ["Yes, find me a battery", "Quick check first"] }]);
+  });
+
   it("returns a validation error for malformed (e.g. truncated) input", async () => {
     const { ctx: c } = ctx();
     const r = await runTool("show_diagnosis", { car_id: "corolla", title: "x" }, c);

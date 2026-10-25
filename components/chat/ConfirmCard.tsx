@@ -1,5 +1,5 @@
 "use client";
-import { CheckCircle2, Hand, Loader2, Zap } from "lucide-react";
+import { Loader2, ShieldCheck, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { UiEvent } from "@/lib/agent/events";
 import { actions } from "@/lib/commerce/client";
@@ -8,13 +8,14 @@ import { useOrders } from "@/lib/store/orders";
 import { ActionSummary } from "../commerce/ActionSummary";
 import { PayPalPay } from "../commerce/PayPalRoot";
 import { Button } from "../ui";
+import { Receipt } from "./Checkout";
 
 type ActionEvent = Extract<UiEvent, { type: "action" }>;
 
-const DONE = {
-  parts: "Paid with PayPal",
-  shop_deposit: "Deposit held with PayPal",
-  technician_invoice: "PayPal invoice sent",
+const TITLE = {
+  parts: "Ready to pay",
+  shop_deposit: "Ready to hold your slot",
+  technician_invoice: "Ready to book",
 };
 
 /**
@@ -29,7 +30,6 @@ export function ConfirmCard({ e }: { e: ActionEvent }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const wallet = useOrders((s) => s.wallet);
-  const openOrders = useOrders((s) => s.setOpen);
 
   // The card may be rendered again from saved chat history, so ask the server where it stands.
   useEffect(() => {
@@ -68,26 +68,18 @@ export function ConfirmCard({ e }: { e: ActionEvent }) {
 
   const oneTap = action.kind !== "technician_invoice" && blocker === null;
 
+  if (action.status === "confirmed") return <Receipt action={action} />;
+
   return (
     <div className="rise overflow-hidden rounded-2xl border border-line bg-surface-solid shadow-[var(--shadow-sm)]">
-      <div className="flex items-center gap-2 border-b border-line bg-surface-2/60 px-3.5 py-2.5">
-        <Hand size={14} className="text-accent" />
-        <span className="text-[13px] font-semibold">{action.status === "confirmed" ? "Done" : "Ready when you are"}</span>
-        <span className="ml-auto text-[11px] text-muted">Prepared by your mechanic</span>
+      <div className="flex items-center gap-2 border-b border-line bg-surface-2 px-3 py-2">
+        <ShieldCheck size={14} className="shrink-0 text-accent" />
+        <span className="text-[13px] font-semibold">{action.status === "pending" || action.status === "confirming" ? TITLE[action.kind] : "Checkout closed"}</span>
+        <span className="sandbox-chip ml-auto">PayPal sandbox</span>
       </div>
       <div className="space-y-3 p-3.5">
         <ActionSummary action={action} compact />
-        {action.status === "confirmed" ? (
-          <div className="rounded-xl border border-ok/30 bg-ok/10 px-3 py-2.5 text-xs">
-            <div className="flex items-center gap-1.5 font-semibold text-ok">
-              <CheckCircle2 size={14} /> {DONE[action.kind]}
-              {action.via === "vault" && <span className="font-normal text-muted">· one tap</span>}
-            </div>
-            <button type="button" className="mt-1.5 font-medium text-accent" onClick={() => openOrders(true)}>
-              View in Orders
-            </button>
-          </div>
-        ) : action.status === "expired" || action.status === "cancelled" ? (
+        {action.status === "expired" || action.status === "cancelled" ? (
           <p className="rounded-xl bg-surface-2 px-3 py-2 text-xs text-muted">
             {action.status === "expired" ? "This offer expired after 15 minutes. Ask again and I'll prepare it fresh." : "Cancelled. Nothing was charged."}
           </p>
@@ -122,6 +114,7 @@ export function ConfirmCard({ e }: { e: ActionEvent }) {
               <input type="checkbox" checked={save} onChange={(x) => setSave(x.target.checked)} className="mt-0.5 accent-[var(--accent)]" />
               <span>Save PayPal so next time it&apos;s one tap. You can remove it in Orders.</span>
             </label>
+            <p className="text-[11px] text-faint">Test payment: log in with a PayPal sandbox buyer account. No real money moves.</p>
           </div>
         )}
         {action.status === "pending" && (

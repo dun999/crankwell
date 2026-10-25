@@ -143,3 +143,28 @@ describe("confirm", () => {
     expect(txGet(r.action.txId!)?.status).toBe("SENT");
   });
 });
+
+describe("buy from a parts card", () => {
+  const buy = async (body: Record<string, unknown>) => {
+    const { POST } = await import("@/app/api/actions/route");
+    return POST(new Request("https://crankwell.test/api/actions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+  };
+
+  it("prices the SKU on the server for the part on the card", async () => {
+    const s = newSession();
+    const res = await buy({ sessionId: s, sku: "FYC-COROLLA-BRAKE_PADS-O", partId: "brakes.pads.fr" });
+    expect(res.status).toBe(200);
+    const r = await res.json();
+    expect(r.action.status).toBe("pending");
+    expect(r.action.payload).toMatchObject({ kind: "parts", partId: "brakes.pads.fr", items: [{ sku: "FYC-COROLLA-BRAKE_PADS-O", quantity: 1 }] });
+    expect(r.oneTapBlocker).toMatch(/Save PayPal/);
+    expect(actions.listActions(s).map((a) => a.id)).toContain(r.action.id);
+  });
+
+  it("ignores a part the SKU doesn't fit and rejects unknown SKUs", async () => {
+    const s = newSession();
+    const r = await (await buy({ sessionId: s, sku: "FYC-COROLLA-BRAKE_PADS-O", partId: "electrical.battery" })).json();
+    expect(r.action.payload.partId).toMatch(/^brakes\.pads\./);
+    expect((await buy({ sessionId: s, sku: "FYC-COROLLA-NOPE-O" })).status).toBe(404);
+  });
+});

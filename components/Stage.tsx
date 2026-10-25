@@ -4,6 +4,7 @@ import { useTheme } from "next-themes";
 import { Component, useEffect, type ReactNode } from "react";
 import { useMounted } from "@/lib/hooks";
 import { applyUiEvent, useChat } from "@/lib/store/chat";
+import { useOrders } from "@/lib/store/orders";
 import { useScene } from "@/lib/store/scene";
 
 const CarCanvas = dynamic(() => import("./scene/CarCanvas"), {
@@ -31,7 +32,7 @@ export function Stage({ story = false }: { story?: boolean }) {
   const mounted = useMounted();
   const progress = useScene((s) => s.progress);
   useEffect(() => {
-    if (process.env.NODE_ENV !== "production") Object.assign(window, { __scene: useScene, __chat: useChat, __applyUi: applyUiEvent });
+    if (process.env.NODE_ENV !== "production") Object.assign(window, { __scene: useScene, __chat: useChat, __orders: useOrders, __applyUi: applyUiEvent });
   }, []);
   const dark = mounted ? resolvedTheme === "dark" : false;
   return (

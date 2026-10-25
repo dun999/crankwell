@@ -11,10 +11,11 @@ import { createSelectiveStorage } from "./storage";
 
 export type Block =
   | { kind: "text"; text: string }
-  | { kind: "progress"; text: string }
   | { kind: "tool"; id: string; name: string; label: string; status: "running" | "done" | "error"; at?: number; ms?: number }
   | { kind: "ui"; event: UiEvent; answers?: Record<string, string>; submitted?: boolean }
-  | { kind: "error"; text: string };
+  | { kind: "error"; text: string }
+  /** Buy tapped on a parts card: becomes the checkout card once the server has priced it. */
+  | { kind: "checkout"; sku: string; partId?: string; label: string };
 
 export interface ChatMessage {
   id: string;
@@ -22,6 +23,9 @@ export interface ChatMessage {
   blocks: Block[];
   /** Set when the message came from a diagnosis made in Claude (opened via /app?case=). */
   caseId?: string;
+  /** When the mechanic started on it, and how long the turn took. */
+  startedAt?: number;
+  ms?: number;
 }
 
 interface ChatState {
@@ -37,6 +41,8 @@ interface ChatState {
   send: (text: string) => Promise<void>;
   setAnswer: (msgId: string, blockIdx: number, testId: string, answer: string) => void;
   submitAnswers: (msgId: string, blockIdx: number) => void;
+  buy: (sku: string, partId: string | undefined, label: string) => void;
+  replaceBlock: (msgId: string, blockIdx: number, block: Block) => void;
   openCase: (c: DiagnosisCase, actions: Action[]) => void;
   stop: () => void;
   reset: () => void;
@@ -100,7 +106,7 @@ export const useChat = create<ChatState>()(
           streaming: true,
           draft: "",
           open: true,
-          messages: [...s.messages, { id: uid(), role: "user", blocks: [{ kind: "text", text: msg }] }, { id: assistantId, role: "assistant", blocks: [] }],
+          messages: [...s.messages, { id: uid(), role: "user", blocks: [{ kind: "text", text: msg }] }, { id: assistantId, role: "assistant", blocks: [], startedAt: Date.now() }],
         }));
 
         const patch = (fn: (blocks: Block[]) => Block[]) =>
@@ -145,12 +151,6 @@ export const useChat = create<ChatState>()(
                   if (last?.kind === "text") return [...b.slice(0, -1), { kind: "text", text: last.text + d.delta }];
                   return [...b, { kind: "text", text: d.delta }];
                 });
-              } else if (ev === "progress") {
-                patch((b) => {
-                  const last = b[b.length - 1];
-                  if (last?.kind === "progress") return [...b.slice(0, -1), { kind: "progress", text: last.text + d.text }];
-                  return [...b, { kind: "progress", text: d.text }];
-                });
               } else if (ev === "tool") {
                 patch((b) => {
                   const idx = b.findIndex((x) => x.kind === "tool" && x.id === d.id);
@@ -172,7 +172,10 @@ export const useChat = create<ChatState>()(
           if ((err as Error).name !== "AbortError") patch((b) => [...b, { kind: "error", text: "Connection lost. Please try again." }]);
         } finally {
           controller = null;
-          set({ streaming: false });
+          set((s) => ({
+            streaming: false,
+            messages: s.messages.map((m) => (m.id === assistantId ? { ...m, ms: Date.now() - (m.startedAt ?? Date.now()) } : m)),
+          }));
         }
       },
 
@@ -201,6 +204,21 @@ export const useChat = create<ChatState>()(
         }));
         void get().send(`Here are my safety test results:\n${lines.join("\n")}`);
       },
+
+      buy: (sku, partId, label) => {
+        if (get().streaming) return;
+        set((s) => ({
+          open: true,
+          messages: [
+            ...s.messages,
+            { id: uid(), role: "user", blocks: [{ kind: "text", text: `Buy ${label}` }] },
+            { id: uid(), role: "assistant", blocks: [{ kind: "checkout", sku, partId, label }] },
+          ],
+        }));
+      },
+
+      replaceBlock: (msgId, blockIdx, block) =>
+        set((s) => ({ messages: s.messages.map((m) => (m.id !== msgId ? m : { ...m, blocks: m.blocks.map((b, i) => (i === blockIdx ? block : b)) })) })),
 
       openCase: (c, actions) => {
         const diagnosis: UiEvent = { type: "diagnosis", carId: c.carId, title: c.title, summary: c.summary, severity: c.severity, driveSafety: c.driveSafety, suspects: c.suspects };

@@ -39,6 +39,12 @@ export interface RecommendedAction {
   estCost?: { min: number; max: number };
 }
 
+/** A part the mechanic suggests buying, with every SKU the store sells for it. */
+export interface PartOffer {
+  part: { id: string; name: string };
+  skus: SparePart[];
+}
+
 export type UiEvent =
   | { type: "focus"; carId: CarId; partIds: string[]; reason: string }
   | {
@@ -52,7 +58,11 @@ export type UiEvent =
     }
   | { type: "safety_tests"; intro: string; tests: SafetyTest[] }
   | { type: "recommendations"; carId: CarId; headline: string; actions: RecommendedAction[] }
-  | { type: "action"; action: Action; oneTap: boolean };
+  | { type: "action"; action: Action; oneTap: boolean }
+  /** Parts with prices and Buy buttons; `pick` is the SKU the mechanic recommends. */
+  | { type: "parts"; carId: CarId; headline: string; note?: string; groups: PartOffer[]; pick?: string }
+  /** Tappable replies under the mechanic's message. */
+  | { type: "replies"; replies: string[] };
 
 /** A diagnosis saved for a deep link (/app?case=<id>), e.g. one made in Claude through the MCP connector. */
 export interface DiagnosisCase {
@@ -72,7 +82,6 @@ export interface DiagnosisCase {
 
 export type StreamEvent =
   | { event: "text"; data: { delta: string } }
-  | { event: "progress"; data: { text: string } }
   | { event: "tool"; data: { id: string; name: string; label: string; status: "running" | "done" | "error" } }
   | { event: "ui"; data: UiEvent }
   | { event: "error"; data: { message: string } }

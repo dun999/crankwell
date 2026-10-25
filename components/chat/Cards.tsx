@@ -8,13 +8,15 @@ import {
   ClipboardCheck,
   Crosshair,
   Hammer,
+  Package,
   ShieldAlert,
   ShieldCheck,
   ShoppingCart,
+  Sparkles,
   Truck,
   UserRoundCog,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { RecommendedAction, UiEvent } from "@/lib/agent/events";
 import { SYSTEM_META } from "@/lib/cars/types";
 import { confidenceColor } from "@/lib/confidence";
@@ -22,12 +24,14 @@ import { useChat } from "@/lib/store/chat";
 import { useScene } from "@/lib/store/scene";
 import { ShopReserve, TechnicianBook } from "../commerce/Booking";
 import { PartShop } from "../commerce/PartShop";
+import { FREE_SHIPPING_OVER } from "@/lib/catalog/spare-parts";
 import { Button, money } from "../ui";
 
 type Diagnosis = Extract<UiEvent, { type: "diagnosis" }>;
 type Tests = Extract<UiEvent, { type: "safety_tests" }>;
 type Recs = Extract<UiEvent, { type: "recommendations" }>;
 type Focus = Extract<UiEvent, { type: "focus" }>;
+type Parts = Extract<UiEvent, { type: "parts" }>;
 
 const SEVERITY = {
   low: { label: "Low severity", color: "var(--ok)" },
@@ -262,5 +266,95 @@ function ActionRow({ a, carId, open, onToggle }: { a: RecommendedAction; carId: 
         </div>
       )}
     </li>
+  );
+}
+
+const TIER = { Value: "V", "OE-Equivalent": "OE", Performance: "P" } as const;
+
+/** Parts the mechanic found, each with a Buy button that opens PayPal sandbox checkout in the chat. */
+export function PartsCard({ e }: { e: Parts }) {
+  const buy = useChat((s) => s.buy);
+  const streaming = useChat((s) => s.streaming);
+  // Buy should open the checkout at once, so fetch its code while the user compares prices.
+  useEffect(() => {
+    void import("./Checkout");
+    void import("./ConfirmCard");
+  }, []);
+  return (
+    <div className="rise overflow-hidden rounded-2xl border border-line bg-surface-solid shadow-[var(--shadow-sm)]">
+      <div className="flex items-center gap-2 border-b border-line bg-surface-2 px-3 py-2">
+        <Package size={14} className="shrink-0 text-accent" />
+        <span className="min-w-0 flex-1 text-[13px] font-semibold leading-snug">{e.headline}</span>
+        <span className="sandbox-chip">Sandbox</span>
+      </div>
+      {e.note && <p className="border-b border-line px-3 py-2 text-xs leading-relaxed text-muted">{e.note}</p>}
+      {e.groups.map((g) => (
+        <section key={g.part.id}>
+          {e.groups.length > 1 && (
+            <button type="button" onClick={() => useScene.getState().focusParts([g.part.id], true)} className="fig flex w-full items-center gap-1 px-3 pb-1 pt-2.5 text-left hover:text-ink">
+              <Crosshair size={11} /> {g.part.name}
+            </button>
+          )}
+          <ul className="divide-y divide-[var(--border)]">
+            {g.skus.map((x) => {
+              const pick = x.sku === e.pick;
+              return (
+                <li key={x.sku} className={clsx("flex items-center gap-2.5 px-3 py-2.5", pick && "bg-accent-soft", !x.inStock && "opacity-55")}>
+                  <span className="tier-badge" title={x.tier}>{TIER[x.tier]}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[13px] font-semibold leading-tight">
+                      {x.brand}
+                      {pick && (
+                        <span className="inline-flex items-center gap-0.5 text-[10.5px] font-semibold text-accent">
+                          <Sparkles size={10} /> Mechanic&apos;s pick
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 text-[11px] leading-snug text-muted">
+                      {x.tier} · {x.warranty} · {x.inStock ? `ships in ${x.shipDays} day${x.shipDays === 1 ? "" : "s"}` : "out of stock"}
+                    </div>
+                  </div>
+                  <span className="num shrink-0 text-[13.5px] font-semibold">{money(x.price)}</span>
+                  <Button
+                    size="sm"
+                    variant={pick ? "primary" : "secondary"}
+                    disabled={!x.inStock || streaming}
+                    aria-label={`Buy ${x.name} (${x.tier}) for ${money(x.price)}`}
+                    onClick={() => buy(x.sku, g.part.id, `${x.name} (${x.tier}) · ${money(x.price)}`)}
+                  >
+                    Buy
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
+      <div className="flex items-center gap-1.5 border-t border-line px-3 py-2 text-[11px] text-muted">
+        <Truck size={12} className="shrink-0" /> Free shipping over {money(FREE_SHIPPING_OVER)} · pay with PayPal sandbox
+      </div>
+    </div>
+  );
+}
+
+/** One-tap answers under the mechanic's last message. */
+export function Replies({ replies }: { replies: string[] }) {
+  const send = useChat((s) => s.send);
+  return (
+    <div className="rise flex flex-wrap gap-1.5" role="group" aria-label="Suggested replies">
+      {replies.map((r, i) => (
+        <button
+          key={r}
+          type="button"
+          onClick={() => void send(r)}
+          className={clsx(
+            "touch-target inline-flex min-h-8 items-center rounded-full border px-3 py-1 text-left text-[12.5px] font-medium transition-[background-color,border-color,color]",
+            i === 0 ? "border-accent/40 bg-accent-soft text-accent hover:border-accent" : "border-line-strong bg-surface-solid text-ink hover:bg-surface-2",
+          )}
+        >
+          {r}
+        </button>
+      ))}
+    </div>
   );
 }

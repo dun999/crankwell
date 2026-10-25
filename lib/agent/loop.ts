@@ -90,6 +90,7 @@ export async function runAgentTurn(opts: {
   const ctx = { sessionId: opts.sessionId, view: opts.view, emit: (e: UiEvent) => write({ event: "ui", data: e }) };
 
   let stopReason: string | null = null;
+  let said = false;
   for (let step = 0; step < MAX_STEPS; step++) {
     const stream = await client().chat.completions.create(
       {
@@ -119,11 +120,8 @@ export async function runAgentTurn(opts: {
         content += delta.content;
         write({ event: "text", data: { delta: delta.content } });
       }
-      const note = delta.reasoning_content || delta.reasoning;
-      if (note) {
-        reasoning += note;
-        write({ event: "progress", data: { text: note } });
-      }
+      // Reasoning stays on the server: it is replayed to the model, never shown in the chat.
+      reasoning += delta.reasoning_content || delta.reasoning || "";
       for (const tc of delta.tool_calls ?? []) {
         const cur = acc.get(tc.index) ?? { id: "", name: "", arguments: "", announced: false };
         if (tc.id) cur.id = tc.id;
@@ -170,7 +168,9 @@ export async function runAgentTurn(opts: {
     });
 
     if (!toolCalls.length) break;
+    said ||= Boolean(content.trim());
 
+    let failed = false;
     for (const tu of toolCalls) {
       let input: unknown = {};
       let parsed = true;
@@ -182,6 +182,7 @@ export async function runAgentTurn(opts: {
       const r = parsed
         ? await runTool(tu.function.name, input, ctx)
         : { content: "Invalid input: tool arguments were not valid JSON. Call the tool again with valid JSON.", isError: true };
+      failed ||= Boolean(r.isError);
       messages.push({ role: "tool", tool_call_id: tu.id, name: tu.function.name, content: r.content });
       write({
         event: "tool",
@@ -193,6 +194,8 @@ export async function runAgentTurn(opts: {
         },
       });
     }
+    // Reply chips close the turn: once the message is written, another model call would only repeat it.
+    if (said && !failed && toolCalls.some((t) => t.function.name === "suggest_replies")) break;
   }
 
   saveConversation(opts.conversationId, opts.sessionId, messages);

@@ -56,6 +56,8 @@ export const actions = {
     if (!r.ok) throw new Error(data.error ?? "Couldn't load this checkout");
     return data;
   },
+  /** Price a SKU from a parts card into an action (Buy). */
+  prepare: (sku: string, partId?: string) => post<ActionStatus>("/api/actions", { sku, partId }),
   async confirm(id: string, email?: string) {
     const r = await post<{ action: Action; tx?: Transaction }>(`/api/actions/${id}/confirm`, { email });
     if (r.tx) useOrders.getState().upsert(r.tx, true);
