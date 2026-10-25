@@ -23,8 +23,12 @@ export async function handle(fn: () => Promise<Response>): Promise<Response> {
 }
 
 export function originOf(req: Request) {
+  return originFromHeaders(req.headers);
+}
+
+/** Public origin for links and OAuth metadata: PUBLIC_URL, else the forwarded host. */
+export function originFromHeaders(h: Headers) {
   if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/$/, "");
-  const h = req.headers;
   const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
   const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   return `${proto}://${host}`;

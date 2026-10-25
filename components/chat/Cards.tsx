@@ -60,22 +60,22 @@ export function DiagnosisCard({ e }: { e: Diagnosis }) {
   const ranked = [...e.suspects].sort((a, b) => b.confidence - a.confidence);
   return (
     <div className="rise overflow-hidden rounded-2xl border border-line bg-surface-solid shadow-[var(--shadow-sm)]">
-      <div className="flex items-center gap-2 border-b border-line bg-surface-2/60 px-3.5 py-2.5">
-        <ClipboardCheck size={15} className="text-accent" />
-        <span className="text-[13px] font-semibold">{e.title}</span>
-        <span className="ml-auto rounded-full px-2 py-0.5 text-[10.5px] font-semibold" style={{ color: sev.color, background: `color-mix(in srgb, ${sev.color} 12%, transparent)` }}>
+      <div className="flex items-center gap-2 border-b border-line bg-surface-2 px-3 py-2">
+        <ClipboardCheck size={14} className="shrink-0 text-accent" />
+        <span className="min-w-0 text-[13px] font-semibold leading-snug">{e.title}</span>
+        <span className="stamp ml-auto shrink-0" style={{ color: sev.color }}>
           {sev.label}
         </span>
       </div>
-      <div className="space-y-3 p-3.5">
-        <div className={clsx("flex items-start gap-2 rounded-xl border px-2.5 py-2 text-xs font-medium", drive.cls)}>
+      <div className="space-y-3 p-3">
+        <div className={clsx("flex items-start gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-medium", drive.cls)}>
           <drive.icon size={14} className="mt-px shrink-0" /> {drive.text}
         </div>
         <p className="text-[13px] leading-relaxed text-ink/90">{e.summary}</p>
         <div>
-          <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted">Most likely causes</div>
-          <ul className="space-y-1.5">
-            {ranked.map((s) => (
+          <div className="fig mb-1.5 flex justify-between"><span>Fig. 2 — Most likely causes</span><span>Conf.</span></div>
+          <ul className="divide-y divide-[var(--border)] border-y border-line">
+            {ranked.map((s, i) => (
               <li key={s.partId}>
                 <button
                   type="button"
@@ -84,19 +84,20 @@ export function DiagnosisCard({ e }: { e: Diagnosis }) {
                     sc.select(s.partId);
                     sc.focusParts([s.partId], false);
                   }}
-                  className="group w-full rounded-xl border border-line px-2.5 py-2 text-left transition hover:border-line-strong"
+                  className="group w-full px-1 py-2 text-left transition-colors hover:bg-surface-2"
+                  title={SYSTEM_META[s.system].label}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: SYSTEM_META[s.system].color }} />
+                    <span className="callout" style={{ color: confidenceColor(s.confidence) }}>{i + 1}</span>
                     <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{s.name}</span>
-                    <span className="text-[13px] font-semibold tabular-nums" style={{ color: confidenceColor(s.confidence) }}>
+                    <span className="mono text-[12px] font-semibold" style={{ color: confidenceColor(s.confidence) }}>
                       {Math.round(s.confidence * 100)}%
                     </span>
                   </div>
-                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--border)]">
+                  <div className="ml-[26px] mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--border)]">
                     <div className="h-full rounded-full transition-[width] duration-700" style={{ width: `${s.confidence * 100}%`, background: confidenceColor(s.confidence) }} />
                   </div>
-                  <div className="mt-1.5 text-xs leading-snug text-muted">{s.rationale}</div>
+                  <div className="ml-[26px] mt-1 text-xs leading-snug text-muted">{s.rationale}</div>
                 </button>
               </li>
             ))}
@@ -114,10 +115,10 @@ export function SafetyTestCard({ e, msgId, blockIdx, answers, submitted }: { e: 
   const answered = Object.keys(answers ?? {}).length;
   return (
     <div className="rise overflow-hidden rounded-2xl border border-line bg-surface-solid shadow-[var(--shadow-sm)]">
-      <div className="flex items-center gap-2 border-b border-line bg-surface-2/60 px-3.5 py-2.5">
-        <ShieldCheck size={15} className="text-ok" />
+      <div className="flex items-center gap-2 border-b border-line bg-surface-2 px-3 py-2">
+        <ShieldCheck size={14} className="text-ok" />
         <span className="text-[13px] font-semibold">Safe checks to confirm</span>
-        <span className="ml-auto text-[11px] text-muted">
+        <span className="mono ml-auto text-[10.5px] text-muted">
           {answered}/{e.tests.length} answered
         </span>
       </div>
@@ -191,7 +192,7 @@ export function RecommendationsCard({ e }: { e: Recs }) {
   const [open, setOpen] = useState(0);
   return (
     <div className="rise overflow-hidden rounded-2xl border border-line bg-surface-solid shadow-[var(--shadow-sm)]">
-      <div className="border-b border-line bg-surface-2/60 px-3.5 py-2.5 text-[13px] font-semibold">{e.headline}</div>
+      <div className="border-b border-line bg-surface-2 px-3 py-2 text-[13px] font-semibold">{e.headline}</div>
       <ul className="divide-y divide-[var(--border)]">
         {e.actions.map((a, i) => (
           <ActionRow key={i} a={a} carId={e.carId} open={open === i} onToggle={() => setOpen(open === i ? -1 : i)} />
@@ -205,25 +206,25 @@ function ActionRow({ a, carId, open, onToggle }: { a: RecommendedAction; carId: 
   const M = ACTION_META[a.type];
   return (
     <li>
-      <button type="button" onClick={onToggle} className="flex w-full items-start gap-3 px-3.5 py-3 text-left transition-colors hover:bg-surface-2">
-        <span className={clsx("grid h-8 w-8 shrink-0 place-items-center rounded-[10px]", a.urgency === "now" ? "bg-danger/10 text-danger" : "bg-surface-3 text-ink")}>
-          <M.icon size={16} />
+      <button type="button" onClick={onToggle} className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-surface-2">
+        <span className={clsx("grid h-7 w-7 shrink-0 place-items-center rounded-md", a.urgency === "now" ? "bg-danger/10 text-danger" : "bg-surface-3 text-ink")}>
+          <M.icon size={15} />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[11px] font-medium uppercase tracking-wide text-muted">
+          <span className="fig block text-[10px]">
             {M.label} · {URGENCY[a.urgency]}
           </span>
           <span className="block text-[13px] font-semibold leading-snug">{a.title}</span>
-          {a.estCost && (
-            <span className="block text-xs text-muted">
-              Est. {money(a.estCost.min)}–{money(a.estCost.max)}
-            </span>
-          )}
         </span>
-        <ChevronDown size={15} className={clsx("mt-1 text-muted transition", open && "rotate-180")} />
+        {a.estCost && (
+          <span className="mono shrink-0 pt-3 text-[11.5px] text-ink/85">
+            {money(a.estCost.min)}–{money(a.estCost.max)}
+          </span>
+        )}
+        <ChevronDown size={14} className={clsx("mt-3 shrink-0 text-muted transition", open && "rotate-180")} />
       </button>
       {open && (
-        <div className="space-y-2.5 px-3.5 pb-3.5 text-xs">
+        <div className="space-y-2.5 px-3 pb-3 text-xs">
           <p className="text-muted">{a.why}</p>
           {a.type === "diy" && (
             <>

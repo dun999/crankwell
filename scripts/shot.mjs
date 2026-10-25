@@ -1,7 +1,6 @@
 // Dev helper: render the app in headless Chromium (GPU) and save screenshots.
 // usage: node scripts/shot.mjs out.png [--js "<code>"] [--wait ms] [--theme dark|light] [--size 1440x900]
 import { chromium } from "playwright-core";
-import os from "node:os";
 
 const args = process.argv.slice(2);
 const out = args[0] ?? "shot.png";
@@ -10,10 +9,10 @@ const js = get("--js", "");
 const wait = Number(get("--wait", "2500"));
 const theme = get("--theme", "light");
 const [w, h] = get("--size", "1440x900").split("x").map(Number);
-const url = get("--url", "http://localhost:3000/");
+const url = get("--url", "http://localhost:3000/app");
 
 const browser = await chromium.launch({
-  executablePath: `${os.homedir()}/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome`,
+  executablePath: process.env.CHROMIUM_PATH ?? chromium.executablePath(),
   args: ["--use-angle=vulkan", "--enable-gpu", "--ignore-gpu-blocklist", "--enable-features=Vulkan", "--enable-unsafe-swiftshader"],
 });
 const page = await browser.newPage({ viewport: { width: w, height: h }, colorScheme: theme, deviceScaleFactor: 1 });

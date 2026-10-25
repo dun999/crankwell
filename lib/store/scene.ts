@@ -32,6 +32,8 @@ export interface SceneState {
   quality: Quality;
   autoRotate: boolean;
   progress: { done: number; total: number } | null;
+  /** The car whose model has finished building and is on screen. */
+  ready: CarId | null;
   /** AG Grid price guide docked under the 3D view */
   guideOpen: boolean;
   /** Pixels of the canvas covered by floating controls; the camera frames the model in the rest. */
@@ -48,6 +50,8 @@ export interface SceneState {
   focusParts: (ids: string[], cinematic?: boolean) => void;
   resetView: () => void;
   clearDiagnosis: () => void;
+  /** Back to the plain assembled car: no diagnosis, x-ray, isolation or hidden systems. */
+  resetScene: () => void;
   setQuality: (q: Quality) => void;
   setAutoRotate: (v: boolean) => void;
   setProgress: (p: { done: number; total: number } | null) => void;
@@ -71,6 +75,7 @@ export const useScene = create<SceneState>((set) => ({
   quality: typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches ? "balanced" : "high",
   autoRotate: false,
   progress: null,
+  ready: null,
   guideOpen: false,
   viewInset: { bottom: 0 },
 
@@ -91,6 +96,7 @@ export const useScene = create<SceneState>((set) => ({
   focusParts: (ids, cinematic = true) => set((s) => ({ focus: { ids, cinematic, nonce: (s.focus?.nonce ?? 0) + 1 } })),
   resetView: () => set((s) => ({ resetNonce: s.resetNonce + 1, focus: null })),
   clearDiagnosis: () => set((s) => ({ highlights: {}, isolate: null, xray: false, focus: null, resetNonce: s.resetNonce + 1 })),
+  resetScene: () => set((s) => ({ selected: null, hovered: null, highlights: {}, focus: null, isolate: null, explode: 0, explodeSystems: null, xray: false, hiddenSystems: [], autoRotate: false, resetNonce: s.resetNonce + 1 })),
   setQuality: (quality) => set({ quality }),
   setAutoRotate: (autoRotate) => set({ autoRotate }),
   setProgress: (progress) => set({ progress }),

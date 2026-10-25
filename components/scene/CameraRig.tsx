@@ -1,5 +1,5 @@
 "use client";
-import { CameraControls } from "@react-three/drei";
+import { CameraControls, CameraControlsImpl } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
@@ -32,7 +32,7 @@ function liftAboveInset(pos: THREE.Vector3, target: THREE.Vector3, up: THREE.Vec
  * search, inspector) play a two-phase "motion zoom": ease back to an
  * overview on the side of the target, then dive in and frame the parts.
  */
-export function CameraRig({ built }: { built: BuiltCar | null }) {
+export function CameraRig({ built, story = false }: { built: BuiltCar | null; story?: boolean }) {
   const ref = useRef<CameraControls>(null);
   const three = useThree();
   const { size, camera } = three;
@@ -138,6 +138,14 @@ export function CameraRig({ built }: { built: BuiltCar | null }) {
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") Object.assign(window, { __controls: ref.current, __three: three });
   });
+
+  // On the landing page the wheel and touch scroll the page; a mouse can still drag to rotate.
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    c.mouseButtons.wheel = story ? CameraControlsImpl.ACTION.NONE : CameraControlsImpl.ACTION.DOLLY;
+    c.enabled = !(story && window.matchMedia("(pointer: coarse)").matches);
+  }, [story]);
 
   useFrame(({ invalidate }, dt) => {
     const c = ref.current;

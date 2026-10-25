@@ -1,11 +1,16 @@
 "use client";
 import { create } from "zustand";
-import type { Transaction } from "@/lib/commerce/types";
+import type { Transaction, WalletInfo } from "@/lib/commerce/types";
 import { getSessionId } from "@/lib/session";
 
 interface OrdersState {
   items: Transaction[];
   open: boolean;
+  /** Saved PayPal for one-tap, and apps (Claude) connected to this browser. */
+  wallet: WalletInfo | null;
+  connections: { client: string }[];
+  refreshWallet: () => Promise<void>;
+  forget: (what: "wallet" | "connections") => Promise<void>;
   /** last update notice for toasts */
   flash: { id: string; text: string; nonce: number } | null;
   setOpen: (v: boolean) => void;
@@ -30,6 +35,16 @@ export const useOrders = create<OrdersState>((set, get) => ({
   items: [],
   open: false,
   flash: null,
+  wallet: null,
+  connections: [],
+  refreshWallet: async () => {
+    const r = await fetch(`/api/wallet?session=${encodeURIComponent(getSessionId())}`);
+    if (r.ok) set(await r.json());
+  },
+  forget: async (what) => {
+    const r = await fetch("/api/wallet", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: getSessionId(), what }) });
+    if (r.ok) set(await r.json());
+  },
   setOpen: (open) => set({ open }),
   upsert: (t, announce = false) =>
     set((s) => {
@@ -49,7 +64,9 @@ export const useOrders = create<OrdersState>((set, get) => ({
     const es = new EventSource(`/api/events?session=${encodeURIComponent(getSessionId())}`);
     es.addEventListener("tx", (e) => {
       try {
-        get().upsert(JSON.parse((e as MessageEvent).data), true);
+        const tx = JSON.parse((e as MessageEvent).data) as Transaction;
+        get().upsert(tx, true);
+        if (tx.status === "COMPLETED" || tx.status === "AUTHORIZED") void get().refreshWallet();
       } catch {
         /* ignore malformed */
       }

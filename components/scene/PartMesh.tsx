@@ -27,7 +27,8 @@ function PartMeshImpl({ built, materials, xray, glow, assemblies }: Props) {
   const id = part.id;
   const sys = part.system;
   const group = useRef<THREE.Group>(null);
-  const t = useRef(0);
+  /** Current explode amount; -1 until the first frame, which starts it where the store says. */
+  const t = useRef(-1);
   const off = useMemo(() => new THREE.Vector3(), []);
   const get = useThree((s) => s.get);
   const invalidate = useThree((s) => s.invalidate);
@@ -65,7 +66,8 @@ function PartMeshImpl({ built, materials, xray, glow, assemblies }: Props) {
     const st = useScene.getState();
     const target = explodeTarget(sys, st.explode, st.explodeSystems);
     if (t.current === target) return;
-    if (Math.abs(t.current - target) > 1e-4) t.current = THREE.MathUtils.damp(t.current, target, 2.2, Math.min(dt, 0.05));
+    if (t.current < 0) t.current = target;
+    else if (Math.abs(t.current - target) > 1e-4) t.current = THREE.MathUtils.damp(t.current, target, 2.2, Math.min(dt, 0.05));
     else t.current = target;
     explodeOffset(part, assemblies, t.current, off);
     g.position.set(part.position[0] + off.x, part.position[1] + off.y, part.position[2] + off.z);
@@ -117,8 +119,8 @@ function PartMeshImpl({ built, materials, xray, glow, assemblies }: Props) {
         meshes.map((m, i) => <mesh key={`g${i}`} geometry={m.geometry} material={glowMat} raycast={noRaycast} renderOrder={3} />)}
       {confidence !== undefined && !hidden && (
         <Html position={labelPos} center zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
-          <div className="suspect-label" style={{ ["--c" as string]: confidenceColor(confidence), ["--lift" as string]: `${18 + rank * 26}px` }}>
-            <span className="dot" />
+          <div className="suspect-label" style={{ ["--c" as string]: confidenceColor(confidence), ["--lift" as string]: `${26 + rank * 26}px`, ["--delay" as string]: `${0.35 + rank * 0.12}s` }}>
+            <span className="n">{rank + 1}</span>
             <span className="name">{part.name}</span>
             <span className="pct">{Math.round(confidence * 100)}%</span>
           </div>

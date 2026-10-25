@@ -54,7 +54,7 @@ export function IconButton({
       title={label}
       aria-pressed={active}
       className={clsx(
-        "touch-target inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-muted transition-colors duration-150",
+        "touch-target inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted transition-colors duration-150",
         "hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40",
         active && "bg-primary text-primary-ink hover:bg-primary hover:text-primary-ink",
         className,
@@ -77,10 +77,10 @@ export function Button({
     <button
       type="button"
       className={clsx(
-        "touch-target inline-flex items-center justify-center gap-1.5 rounded-xl font-medium transition-[background-color,border-color,color,box-shadow,opacity] duration-150 focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50",
-        size === "sm" ? "min-h-9 px-3 py-1.5 text-xs" : "min-h-10 px-4 py-2 text-sm",
-        variant === "primary" && "bg-primary text-primary-ink shadow-[var(--shadow-sm)] hover:opacity-90",
-        variant === "secondary" && "border border-line bg-surface-solid text-ink shadow-[var(--shadow-sm)] hover:border-line-strong hover:bg-surface-2",
+        "touch-target inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-[background-color,border-color,color,box-shadow,opacity] duration-150 focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50",
+        size === "sm" ? "min-h-8 px-2.5 py-1 text-xs" : "min-h-9 px-3.5 py-1.5 text-[13px]",
+        variant === "primary" && "bg-primary text-primary-ink hover:opacity-90",
+        variant === "secondary" && "border border-line-strong bg-surface-solid text-ink hover:bg-surface-2",
         variant === "ghost" && "text-muted hover:bg-surface-3 hover:text-ink",
         variant === "danger" && "border border-line bg-surface-solid text-danger hover:border-danger/40 hover:bg-danger/5",
         className,
@@ -115,4 +115,11 @@ export function Dots({ value, max = 5, color = "var(--accent)" }: { value: numbe
 
 export function money(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: n % 1 ? 2 : 0 });
+}
+
+/** Short money for dense rows: $40, $1.2k, $12k. */
+export function compactMoney(n: number) {
+  if (n < 1000) return `$${Math.round(n)}`;
+  const k = n / 1000;
+  return `$${k >= 10 ? Math.round(k) : k.toFixed(1).replace(/\.0$/, "")}k`;
 }

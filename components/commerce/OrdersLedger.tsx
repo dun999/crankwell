@@ -15,7 +15,7 @@ function TypeCell({ data, api }: ICellRendererParams<Transaction>) {
   const amountShown = api.getColumn("amount")?.isVisible() ?? true;
   return (
     <span className="flex min-w-0 items-center gap-2.5 leading-tight">
-      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-surface-3 text-ink"><K.icon size={15} strokeWidth={1.75} /></span>
+      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-surface-3 text-ink"><K.icon size={14} strokeWidth={1.75} /></span>
       <span className="min-w-0">
         <span className="block truncate font-medium text-ink">{data.title}</span>
         <span className="block truncate text-[11px] text-muted">{amountShown ? K.short : `${money(Number(data.amount))} · ${K.short}`}</span>

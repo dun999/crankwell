@@ -2,12 +2,10 @@ import "server-only";
 import OpenAI from "openai";
 import { loadConversation, saveConversation } from "@/lib/server/db";
 import type { StreamEvent, UiEvent, ViewContext } from "./events";
+import { BASE_URL, MODEL, agentKey } from "./model";
 import { SYSTEM_PROMPT } from "./prompt";
 import { TOOLS, TOOL_LABELS, runTool, viewContextText, type ToolName } from "./tools";
 
-/** Nemotron on Nebius Token Factory serverless. Override with NEBIUS_MODEL. */
-export const MODEL = process.env.NEBIUS_MODEL || "nvidia/Nemotron-3_5-Lightning";
-const BASE_URL = process.env.NEBIUS_BASE_URL || "https://api.tokenfactory.nebius.com/v1/";
 const MAX_STEPS = 10;
 
 type ToolCall = {
@@ -22,14 +20,14 @@ type ChatMsg =
   | { role: "assistant"; content: string | null; tool_calls?: ToolCall[]; reasoning_content?: string }
   | { role: "tool"; content: string; tool_call_id: string; name?: string };
 
-const g = globalThis as unknown as { __nebius?: OpenAI; __nebiusKey?: string };
+const g = globalThis as unknown as { __agent?: OpenAI; __agentKey?: string };
 const client = () => {
-  const apiKey = process.env.NEBIUS_API_KEY;
-  if (!g.__nebius || g.__nebiusKey !== apiKey) {
-    g.__nebiusKey = apiKey;
-    g.__nebius = new OpenAI({ apiKey, baseURL: BASE_URL });
+  const apiKey = agentKey();
+  if (!g.__agent || g.__agentKey !== apiKey) {
+    g.__agentKey = apiKey;
+    g.__agent = new OpenAI({ apiKey, baseURL: BASE_URL });
   }
-  return g.__nebius;
+  return g.__agent;
 };
 
 function textOf(content: unknown): string | null | undefined {
@@ -74,7 +72,7 @@ function usableHistory(raw: unknown[]): ChatMsg[] {
 
 /**
  * One user turn of the mechanic agent: a streaming manual tool loop against
- * Nebius Token Factory (OpenAI-compatible chat completions).
+ * OpenAI-compatible chat completions (see ./model).
  */
 export async function runAgentTurn(opts: {
   conversationId: string;

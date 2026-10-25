@@ -14,6 +14,7 @@ const DiagnosisCard = dynamic(() => import("./Cards").then((m) => m.DiagnosisCar
 const FocusLine = dynamic(() => import("./Cards").then((m) => m.FocusLine));
 const RecommendationsCard = dynamic(() => import("./Cards").then((m) => m.RecommendationsCard));
 const SafetyTestCard = dynamic(() => import("./Cards").then((m) => m.SafetyTestCard));
+const ConfirmCard = dynamic(() => import("./ConfirmCard").then((m) => m.ConfirmCard));
 
 const SUGGESTIONS = [
   { label: "Soft brake pedal", message: "My brake isn't working properly. The pedal feels soft", icon: Disc3 },
@@ -74,17 +75,17 @@ export function ChatSidebar() {
   return (
     <aside
       aria-label="Mechanic chat"
-      className="chat-panel card"
+      className="chat-panel"
     >
-      <header className="flex shrink-0 items-center gap-1 border-b border-line py-2.5 pl-3.5 pr-2">
-        <div className="relative mr-1.5 h-9 w-9 shrink-0">
-          <Image src={mark} alt="" width={36} height={36} sizes="36px" loading="eager" className="h-9 w-9 rounded-[11px] bg-white object-cover ring-1 ring-line" />
-          <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--surface-solid)] bg-ok" />
+      <header className="flex h-12 shrink-0 items-center gap-0.5 border-b border-line pl-3.5 pr-1.5">
+        <div className="relative mr-2 h-7 w-7 shrink-0">
+          <Image src={mark} alt="" width={28} height={28} sizes="28px" loading="eager" className="h-7 w-7 rounded-[7px] bg-white object-cover ring-1 ring-line" />
+          <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border-[1.5px] border-[var(--surface-solid)] bg-ok" />
         </div>
         <div className="min-w-0 flex-1 leading-tight">
-          <div className="text-[14px] font-semibold tracking-[-0.01em]">AI Mechanic</div>
-          <div className="truncate text-[11px] text-muted">
-            Looking at your {spec.make} {spec.model}
+          <div className="text-[13.5px] font-semibold tracking-[-0.01em]">Mechanic</div>
+          <div className="fig truncate text-[10px]">
+            {streaming ? "Working…" : `On the ${spec.model} ${spec.generation.split(" ")[0]}`}
           </div>
         </div>
         <IconButton
@@ -112,7 +113,7 @@ export function ChatSidebar() {
       <div ref={scroller} role="log" aria-label="Conversation" aria-live="polite" aria-relevant="additions" onScroll={(e) => {
         const el = e.currentTarget;
         followMessages.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-      }} className="scroll-thin min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 py-4">
+      }} className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-3.5 py-3.5">
         {!messages.length && <Welcome onPick={(s) => send(s)} />}
         {messages.map((m, i) => (
           <Message key={m.id} message={m} streaming={streaming && i === messages.length - 1} />
@@ -120,14 +121,14 @@ export function ChatSidebar() {
       </div>
 
       <form
-        className="chat-composer shrink-0 p-3 pt-0"
+        className="chat-composer shrink-0 p-2.5 pt-0"
         onSubmit={(e) => {
           e.preventDefault();
           followMessages.current = true;
           void send(draft);
         }}
       >
-        <div className="flex items-end gap-2 rounded-[18px] border border-line bg-surface-2 p-1.5 transition-[background-color,border-color,box-shadow] focus-within:border-line-strong focus-within:bg-surface-solid focus-within:shadow-[var(--shadow)]">
+        <div className="flex items-end gap-1.5 rounded-xl border border-line-strong bg-surface-2 p-1 transition-[background-color,border-color,box-shadow] focus-within:border-accent focus-within:bg-surface-solid">
           <textarea
             ref={input}
             aria-label="Describe your car problem"
@@ -142,19 +143,19 @@ export function ChatSidebar() {
             }}
             rows={1}
             placeholder="Describe a symptom…"
-            className="max-h-36 min-h-11 min-w-0 flex-1 resize-none bg-transparent px-2 py-2.5 text-base outline-none placeholder:text-muted sm:text-sm"
+            className="max-h-36 min-h-10 min-w-0 flex-1 resize-none bg-transparent px-2 py-2 text-base outline-none placeholder:text-muted sm:text-[13.5px]"
           />
           {streaming ? (
             <IconButton label="Stop" onClick={stop} className="bg-surface-3">
               <Square size={13} className="fill-current" />
             </IconButton>
           ) : (
-            <button type="submit" aria-label="Send" disabled={!draft.trim()} className="grid h-11 w-11 shrink-0 place-items-center rounded-[13px] bg-primary text-primary-ink transition-opacity hover:opacity-90 disabled:opacity-25">
-              <ArrowUp size={18} strokeWidth={2.25} />
+            <button type="submit" aria-label="Send" disabled={!draft.trim()} className="touch-target grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-primary text-primary-ink transition-opacity hover:opacity-90 disabled:opacity-25">
+              <ArrowUp size={17} strokeWidth={2.25} />
             </button>
           )}
         </div>
-        <div className="mt-2 px-1 text-center text-[11px] leading-snug text-faint">
+        <div className="mt-1.5 px-1 text-center text-[10.5px] leading-snug text-faint">
           Guidance only. Have a mechanic inspect safety-critical issues.
         </div>
       </form>
@@ -164,33 +165,31 @@ export function ChatSidebar() {
 
 function Welcome({ onPick }: { onPick: (s: string) => void }) {
   return (
-    <div className="rise space-y-5">
-      <div className="pt-1">
-        <h2 className="text-[19px] font-semibold leading-tight tracking-[-0.025em]">What&apos;s your car doing?</h2>
-        <p className="mt-1.5 text-[13px] leading-relaxed text-muted">
+    <div className="rise space-y-4">
+      <div>
+        <h2 className="text-[17px] font-semibold leading-tight tracking-[-0.025em]">What&apos;s your car doing?</h2>
+        <p className="mt-1 text-[12.5px] leading-relaxed text-muted">
           Describe a symptom. I&apos;ll point to the likely parts on the model, walk you through safe checks and price the fix.
         </p>
       </div>
       <div>
-        <p className="eyebrow mb-2">Try a common symptom</p>
-        <div className="grid grid-cols-2 gap-2">
+        <p className="fig mb-1.5">Try a common symptom</p>
+        <div className="flex flex-wrap gap-1.5">
           {SUGGESTIONS.map((s) => (
             <button key={s.label} type="button" onClick={() => onPick(s.message)}
-              className="group flex min-h-11 items-center gap-2.5 rounded-2xl border border-line bg-surface-solid px-3 py-2.5 text-left text-[13px] font-medium shadow-[var(--shadow-sm)] transition-[border-color,background-color] hover:border-line-strong hover:bg-surface-2">
-              <s.icon size={16} strokeWidth={1.75} className="shrink-0 text-muted transition-colors group-hover:text-ink" />
+              className="group inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-line bg-surface-solid px-2.5 py-1 text-left text-[12.5px] font-medium transition-[border-color,background-color] hover:border-line-strong hover:bg-surface-2">
+              <s.icon size={14} strokeWidth={1.75} className="shrink-0 text-muted transition-colors group-hover:text-ink" />
               {s.label}
             </button>
           ))}
         </div>
       </div>
-      <ol className="space-y-1 rounded-2xl bg-surface-2 p-1.5">
+      <ol className="grid grid-cols-3 border-y border-line">
         {STEPS.map((s, i) => (
-          <li key={s.title} className="flex items-center gap-3 rounded-xl px-2.5 py-2">
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-surface-solid text-ink shadow-[var(--shadow-sm)] ring-1 ring-line"><s.icon size={15} strokeWidth={1.75} /></span>
-            <span className="min-w-0 leading-tight">
-              <span className="block text-[12.5px] font-semibold"><span className="mr-1 text-faint tabular-nums">{i + 1}</span>{s.title}</span>
-              <span className="block text-[12px] text-muted">{s.text}</span>
-            </span>
+          <li key={s.title} className={clsx("px-2 py-2.5", i > 0 && "border-l border-line")}>
+            <span className="mono text-[10px] text-faint">0{i + 1}</span>
+            <span className="mt-0.5 flex items-center gap-1 text-[12px] font-semibold"><s.icon size={12} strokeWidth={2} className="text-muted" />{s.title}</span>
+            <span className="mt-0.5 block text-[11px] leading-snug text-muted">{s.text}</span>
           </li>
         ))}
       </ol>
@@ -213,7 +212,7 @@ function Thinking({ blocks }: { blocks: Block[] }) {
 const Message = memo(function Message({ message: m, streaming }: { message: ChatMessage; streaming: boolean }) {
   if (m.role === "user") return (
     <div className="flex justify-end">
-      <div className="rise max-w-[85%] whitespace-pre-wrap rounded-[18px] rounded-br-md bg-surface-3 px-3.5 py-2 text-[13.5px] leading-relaxed text-ink">
+      <div className="rise max-w-[85%] whitespace-pre-wrap rounded-xl rounded-br-sm bg-surface-3 px-3 py-1.5 text-[13px] leading-relaxed text-ink">
         {(m.blocks[0] as Extract<Block, { kind: "text" }>)?.text}
       </div>
     </div>
@@ -230,17 +229,19 @@ const AssistantBlock = memo(function AssistantBlock({ b, msgId, idx }: { b: Bloc
   switch (b.kind) {
     case "text":
       return (
-        <div className="md text-[13.5px] leading-[1.6] text-ink">
+        <div className="md text-[13px] leading-[1.6] text-ink">
           <ReactMarkdown>{b.text}</ReactMarkdown>
         </div>
       );
     case "progress":
-      return <div className="border-l-2 border-agent/40 pl-2.5 text-xs text-muted">{b.text}</div>;
+      return <div className="border-l border-agent/60 pl-2.5 text-xs italic text-muted">{b.text}</div>;
     case "tool":
       return b.status === "running" ? null : (
-        <div className="flex items-center gap-1.5 px-1 text-[11px] text-faint">
-          <span className={clsx("h-1.5 w-1.5 rounded-full", b.status === "error" ? "bg-danger" : "bg-ok")} />
-          {b.label}
+        <div className="mono flex items-center gap-1.5 border-l border-line-strong py-0.5 pl-2.5 text-[10.5px] text-faint" title={b.label}>
+          <span className={b.status === "error" ? "text-danger" : "text-ok"}>{b.status === "error" ? "✕" : "▸"}</span>
+          <span className="text-muted">{b.name}</span>
+          <span className="min-w-0 truncate">· {b.label}</span>
+          {b.ms !== undefined && <span className="ml-auto shrink-0 pl-2 tabular-nums">{b.ms < 1000 ? `${b.ms}ms` : `${(b.ms / 1000).toFixed(1)}s`}</span>}
         </div>
       );
     case "error":
@@ -255,6 +256,8 @@ const AssistantBlock = memo(function AssistantBlock({ b, msgId, idx }: { b: Bloc
           return <SafetyTestCard e={b.event} msgId={msgId} blockIdx={idx} answers={b.answers} submitted={b.submitted} />;
         case "recommendations":
           return <RecommendationsCard e={b.event} />;
+        case "action":
+          return <ConfirmCard e={b.event} />;
       }
   }
   return null;

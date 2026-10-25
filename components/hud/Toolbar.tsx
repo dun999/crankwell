@@ -47,20 +47,20 @@ export function Toolbar({ onSearch, onBrowse }: { onSearch: () => void; onBrowse
     <>
       <nav ref={bar} className="viewer-toolbar" aria-label="Model controls">
         <label className="assembly-control">
-          <span className="font-medium">Disassembly</span>
+          <span className="fig text-ink">Disassembly</span>
           <input aria-label="Disassembly" aria-valuetext={percent === 0 ? "Fully assembled" : percent === 100 ? "Fully disassembled" : `${percent}% disassembled`} type="range" min={0} max={100} step={1} value={percent}
             onChange={(e) => { s.setExplode(Number(e.target.value) / 100, null); s.setIsolate(null); s.resetView(); }}
             className="slider w-full" style={{ ["--fill" as string]: `${percent}%` }} />
-          <output aria-hidden="true" className="text-right tabular-nums text-muted">{percent}%</output>
+          <output aria-hidden="true" className="mono text-right text-[11px] text-muted">{percent}%</output>
         </label>
         <span className="toolbar-divider" aria-hidden="true" />
         <div className="viewer-actions">
-          <IconButton label="Browse car systems" onClick={onBrowse} className="xl:hidden"><Layers size={18} strokeWidth={1.75} /></IconButton>
-          <IconButton label="X-ray body" active={xray} onClick={() => s.setXray(!xray)}><ScanEye size={18} strokeWidth={1.75} /></IconButton>
-          <IconButton label="Reset view" onClick={() => s.clearDiagnosis()}><Undo2 size={18} strokeWidth={1.75} /></IconButton>
-          <IconButton label="Search parts (Ctrl+K)" onClick={onSearch}><Search size={18} strokeWidth={1.75} /></IconButton>
-          <IconButton label="Price guide" active={guideOpen} onClick={() => s.setGuideOpen(!guideOpen)}><Table2 size={18} strokeWidth={1.75} /></IconButton>
-          <IconButton label="View settings" onClick={() => setSettings(true)}><SlidersHorizontal size={18} strokeWidth={1.75} /></IconButton>
+          <IconButton label="Browse car systems" onClick={onBrowse} className="xl:hidden"><Layers size={17} strokeWidth={1.75} /></IconButton>
+          <IconButton label="X-ray body" active={xray} onClick={() => s.setXray(!xray)}><ScanEye size={17} strokeWidth={1.75} /></IconButton>
+          <IconButton label="Reset view" onClick={() => s.clearDiagnosis()}><Undo2 size={17} strokeWidth={1.75} /></IconButton>
+          <IconButton label="Search parts (Ctrl+K)" onClick={onSearch} className="md:hidden"><Search size={17} strokeWidth={1.75} /></IconButton>
+          <IconButton label="Price guide" active={guideOpen} onClick={() => s.setGuideOpen(!guideOpen)}><Table2 size={17} strokeWidth={1.75} /></IconButton>
+          <IconButton label="View settings" onClick={() => setSettings(true)}><SlidersHorizontal size={17} strokeWidth={1.75} /></IconButton>
         </div>
       </nav>
       {settings && (

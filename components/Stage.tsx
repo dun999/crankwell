@@ -8,7 +8,7 @@ import { useScene } from "@/lib/store/scene";
 
 const CarCanvas = dynamic(() => import("./scene/CarCanvas"), {
   ssr: false,
-  loading: () => <div role="status" className="grid h-full place-items-center text-sm text-muted">Loading 3D explorer…</div>,
+  loading: () => <div role="status" className="fig grid h-full place-items-center">Loading 3D explorer…</div>,
 });
 
 class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -26,7 +26,7 @@ class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean
   }
 }
 
-export function Stage() {
+export function Stage({ story = false }: { story?: boolean }) {
   const { resolvedTheme } = useTheme();
   const mounted = useMounted();
   const progress = useScene((s) => s.progress);
@@ -36,16 +36,13 @@ export function Stage() {
   const dark = mounted ? resolvedTheme === "dark" : false;
   return (
     <div className="absolute inset-0">
-      {mounted && <SceneBoundary><CarCanvas dark={dark} /></SceneBoundary>}
-      {progress && (
+      {mounted && <SceneBoundary><CarCanvas dark={dark} story={story} /></SceneBoundary>}
+      {progress && !story && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
-          <div className="glass rounded-2xl px-5 py-4 text-sm" role="status">
-            <div className="mb-2 font-medium">Building 3D model…</div>
-            <div className="h-1.5 w-48 overflow-hidden rounded-full bg-[var(--border-strong)]" role="progressbar" aria-label="Building car model" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done}>
-              <div className="h-full bg-accent transition-[width]" style={{ width: `${(progress.done / progress.total) * 100}%` }} />
-            </div>
-            <div className="mt-2 text-xs text-muted">
-              {progress.done} / {progress.total} parts
+          <div className="w-56" role="status">
+            <div className="fig mb-2 flex justify-between"><span>Building model</span><span>{progress.done}/{progress.total} parts</span></div>
+            <div className="h-px w-full bg-[var(--border-strong)]" role="progressbar" aria-label="Building car model" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done}>
+              <div className="h-px bg-accent transition-[width]" style={{ width: `${(progress.done / progress.total) * 100}%` }} />
             </div>
           </div>
         </div>

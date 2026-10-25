@@ -175,6 +175,16 @@ export function createMaterials(opts: { paint: string; coolant: string; wheelDar
   return m;
 }
 
+// 1 - |n·v|, kept in [0, 1]. Rounding can push |n·v| past 1 when a face looks straight at the
+// camera, and pow() of a negative base is NaN, which bloom then spreads over the whole frame.
+// Zero-length normals (degenerate triangles) are guarded the same way.
+const RIM = /* glsl */ `
+      float rim(vec3 n, vec3 v) {
+        n *= inversesqrt(max(dot(n, n), 1e-12));
+        v *= inversesqrt(max(dot(v, v), 1e-12));
+        return clamp(1.0 - abs(dot(n, v)), 0.0, 1.0);
+      }`;
+
 /** Fresnel "x-ray" shader used for ghosted parts and the see-through body. */
 export function createXrayMaterial(color: string, opacity: number) {
   return new THREE.ShaderMaterial({
@@ -183,15 +193,16 @@ export function createXrayMaterial(color: string, opacity: number) {
       varying vec3 vN; varying vec3 vV;
       void main() {
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        vN = normalize(normalMatrix * normal);
-        vV = normalize(-mv.xyz);
+        vN = normalMatrix * normal;
+        vV = -mv.xyz;
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: /* glsl */ `
       uniform vec3 uColor; uniform float uOpacity; uniform float uPower;
       varying vec3 vN; varying vec3 vV;
+      ${RIM}
       void main() {
-        float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), uPower);
+        float f = pow(rim(vN, vV), uPower);
         gl_FragColor = vec4(uColor, uOpacity * (0.035 + 0.965 * f));
       }`,
     transparent: true,
@@ -209,15 +220,16 @@ export function createGlowMaterial(color: string) {
       varying vec3 vN; varying vec3 vV;
       void main() {
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        vN = normalize(normalMatrix * normal);
-        vV = normalize(-mv.xyz);
+        vN = normalMatrix * normal;
+        vV = -mv.xyz;
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: /* glsl */ `
       uniform vec3 uColor; uniform float uTime; uniform float uStrength;
       varying vec3 vN; varying vec3 vV;
+      ${RIM}
       void main() {
-        float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 1.6);
+        float f = pow(rim(vN, vV), 1.6);
         float pulse = 0.55 + 0.45 * sin(uTime * 4.0);
         gl_FragColor = vec4(uColor * (0.35 + 1.6 * f) * pulse * uStrength, 1.0);
       }`,

@@ -5,12 +5,29 @@ import { formatPrice, getCar, getPart } from "@/lib/cars";
 import { CAR_SPECS } from "@/lib/cars/specs";
 import type { CarId } from "@/lib/cars/types";
 import { DEFAULT_LOCATION, findShops, findTechnicians, getShop, getTechnician } from "@/lib/catalog/providers";
-import { getSpareParts } from "@/lib/catalog/spare-parts";
-import { listTransactions } from "@/lib/server/commerce";
+import { findSku, getSpareParts } from "@/lib/catalog/spare-parts";
+import type { ActionPayload, RepairShop, SparePart, Technician } from "@/lib/commerce/types";
+import { listActions, oneTapBlocker, prepareAction } from "@/lib/server/actions";
+import { CommerceError, listTransactions } from "@/lib/server/commerce";
 import type { RecommendedAction, Suspect, UiEvent, ViewContext } from "./events";
 
-const CarIdS = z.enum(["corolla", "crv"]);
-const SPECIALTIES = ["brakes", "engine", "transmission", "electrical", "suspension", "cooling", "exhaust", "tires", "body", "general"] as const;
+export const CarIdS = z.enum(["corolla", "crv"]);
+export const SPECIALTIES = ["brakes", "engine", "transmission", "electrical", "suspension", "cooling", "exhaust", "tires", "body", "general"] as const;
+
+/** A purchase the user asked for. Flat on purpose: models fill flat schemas more reliably than unions. */
+export const PrepareActionS = z.object({
+  car_id: CarIdS,
+  kind: z.enum(["parts", "shop_deposit", "technician"]),
+  part_id: z.string().optional().describe("The part this is for. Required for parts unless the sku implies it."),
+  sku: z.string().optional().describe("parts: a sku from search_spare_parts"),
+  quantity: z.number().int().min(1).max(8).optional().describe("parts: how many (default 1)"),
+  shop_id: z.string().optional().describe("shop_deposit: a shop_id from find_repair_shops"),
+  slot: z.string().max(60).optional().describe("shop_deposit: one of that shop's next_slots, exactly (default: the earliest)"),
+  technician_id: z.string().optional().describe("technician: a technician_id from find_technicians"),
+  when: z.string().max(60).optional().describe("technician: when they should come, e.g. 'Today, as soon as possible'"),
+  hours: z.number().min(1).max(6).optional().describe("technician: labor estimate in hours (default 1)"),
+  issue: z.string().max(200).optional().describe("One line for the shop or technician, e.g. 'Soft brake pedal, suspected caliper leak'"),
+});
 
 const schemas = {
   show_diagnosis: z.object({
@@ -76,10 +93,14 @@ const schemas = {
       .min(1)
       .max(5),
   }),
+  prepare_action: PrepareActionS,
   get_orders: z.object({}),
 } as const;
 
 export type ToolName = keyof typeof schemas;
+/** One recommended option (shared with the MCP server's show_options). */
+export const RecommendedOptionS = schemas.recommend_actions.shape.actions.element;
+export const DiagnosisSuspectS = schemas.show_diagnosis.shape.suspects.element;
 
 const DESCRIPTIONS: Record<ToolName, string> = {
   show_diagnosis:
@@ -93,7 +114,9 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   find_technicians: "Find mobile technicians who can come to the car, with call-out fee, hourly rate and ETA. Use before recommending book_technician.",
   recommend_actions:
     "Show the user's options as cards with built-in PayPal checkout (parts), PayPal invoice (technician) or PayPal deposit authorization (shop). Use exact IDs from the lookup tools.",
-  get_orders: "Get the user's PayPal orders, shop reservations and technician invoices with their current status.",
+  prepare_action:
+    "Prepare a purchase the user asked for: buy a part, reserve a repair shop (refundable deposit hold) or book a mobile technician (PayPal invoice). The server prices it and shows a confirm card. Nothing is charged until the user taps Confirm (one tap with saved PayPal, otherwise PayPal approval). Call it only when the user asks you to buy, book or reserve, or accepts your suggestion. Use exact ids from the lookup tools.",
+  get_orders: "Get the user's PayPal orders, shop reservations and technician invoices with their current status, plus anything still waiting for their confirmation.",
 };
 
 export const TOOL_LABELS: Record<ToolName, string> = {
@@ -105,6 +128,7 @@ export const TOOL_LABELS: Record<ToolName, string> = {
   find_repair_shops: "Finding repair shops nearby",
   find_technicians: "Finding mobile technicians",
   recommend_actions: "Putting together your options",
+  prepare_action: "Preparing your checkout",
   get_orders: "Checking your PayPal orders",
 };
 
@@ -128,7 +152,7 @@ export interface ToolResult {
   isError?: boolean;
 }
 
-class ToolInputError extends Error {}
+export class ToolInputError extends Error {}
 
 function suggest(carId: CarId, bad: string) {
   const words = bad.toLowerCase().split(/[._\s-]+/).filter((w) => w.length > 2);
@@ -141,13 +165,13 @@ function suggest(carId: CarId, bad: string) {
   return hits.length ? ` Did you mean one of: ${hits.join(", ")}?` : "";
 }
 
-function requirePart(carId: CarId, partId: string) {
+export function requirePart(carId: CarId, partId: string) {
   const p = getPart(carId, partId);
   if (!p) throw new ToolInputError(`Unknown part_id "${partId}" for ${carId}.${suggest(carId, partId)}`);
   return p;
 }
 
-function partBrief(carId: CarId, partId: string) {
+export function partBrief(carId: CarId, partId: string) {
   const p = requirePart(carId, partId);
   return {
     part_id: p.id,
@@ -161,6 +185,64 @@ function partBrief(carId: CarId, partId: string) {
     sold_in_parts_store: p.template_info.purchasable && p.price.partMax > 0,
     shop_specialty: p.template_info.specialty,
   };
+}
+
+export const skuBrief = (s: SparePart) => ({ sku: s.sku, tier: s.tier, brand: s.brand, price_usd: s.price, warranty: s.warranty, in_stock: s.inStock, ships_in_days: s.shipDays });
+export const shopBrief = (s: RepairShop) => ({ shop_id: s.id, name: s.name, specialties: s.specialties, rating: s.rating, distance_km: s.distanceKm, labor_rate_usd_hr: s.laborRate, deposit_usd: s.deposit, next_slots: s.nextSlots });
+export const technicianBrief = (t: Technician) => ({ technician_id: t.id, name: t.name, skills: t.skills, certified: t.certified, rating: t.rating, callout_fee_usd: t.calloutFee, hourly_rate_usd: t.hourlyRate, eta_minutes: t.etaMinutes });
+
+/** Validate recommended options against the catalog and attach the SKUs, technician or shop they refer to. */
+export function buildRecommendations(carId: CarId, input: z.infer<(typeof schemas)["recommend_actions"]>["actions"], loc: { lat: number; lng: number }): RecommendedAction[] {
+  return input.map((x) => {
+    const part = x.part_id ? requirePart(carId, x.part_id) : undefined;
+    const out: RecommendedAction = {
+      type: x.type,
+      title: x.title,
+      why: x.why,
+      urgency: x.urgency,
+      part: part ? { id: part.id, name: part.name } : undefined,
+      steps: x.steps,
+      toolsNeeded: x.tools_needed,
+      estCost: x.est_cost_usd,
+    };
+    if (x.type === "buy_part") {
+      if (!part) throw new ToolInputError("buy_part needs part_id.");
+      const skus = getSpareParts(carId, part.id);
+      if (!skus.length) throw new ToolInputError(`${part.name} isn't sold in the parts store; offer reserve_shop instead.`);
+      out.skus = skus;
+    }
+    if (x.type === "book_technician") {
+      const t = x.technician_id ? getTechnician(x.technician_id) : undefined;
+      if (!t) throw new ToolInputError("book_technician needs a technician_id from find_technicians.");
+      out.technician = t;
+    }
+    if (x.type === "reserve_shop") {
+      const s = x.shop_id ? getShop(x.shop_id, loc.lat, loc.lng) : undefined;
+      if (!s) throw new ToolInputError("reserve_shop needs a shop_id from find_repair_shops.");
+      out.shop = s;
+    }
+    return out;
+  });
+}
+
+/** Turn a prepare_action call into a server-validated payload. Throws ToolInputError with a hint for the model. */
+export function actionPayload(a: z.infer<typeof PrepareActionS>, location?: { lat: number; lng: number } | null): ActionPayload {
+  if (a.kind === "parts") {
+    if (!a.sku) throw new ToolInputError("parts needs a sku from search_spare_parts.");
+    const sp = findSku(a.sku);
+    if (!sp || sp.carId !== a.car_id) throw new ToolInputError(`Unknown sku "${a.sku}" for ${a.car_id}. Call search_spare_parts first.`);
+    return { kind: "parts", carId: a.car_id, partId: a.part_id ?? sp.partId, items: [{ sku: sp.sku, quantity: a.quantity ?? 1 }] };
+  }
+  if (a.kind === "shop_deposit") {
+    const shop = a.shop_id ? getShop(a.shop_id, location?.lat, location?.lng) : undefined;
+    if (!shop) throw new ToolInputError("shop_deposit needs a shop_id from find_repair_shops.");
+    const slot = a.slot ?? shop.nextSlots[0];
+    if (!shop.nextSlots.includes(slot)) throw new ToolInputError(`slot must be one of: ${shop.nextSlots.join(" | ")}`);
+    return { kind: "shop_deposit", carId: a.car_id, partId: a.part_id, shopId: shop.id, slot, issue: a.issue, location: location ?? null };
+  }
+  const tech = a.technician_id ? getTechnician(a.technician_id) : undefined;
+  if (!tech) throw new ToolInputError("technician needs a technician_id from find_technicians.");
+  return { kind: "technician_invoice", carId: a.car_id, partId: a.part_id, technicianId: tech.id, when: a.when ?? "As soon as possible", hours: a.hours ?? 1, issue: a.issue };
 }
 
 async function exec(name: ToolName, input: unknown, ctx: ToolContext): Promise<unknown> {
@@ -201,61 +283,47 @@ async function exec(name: ToolName, input: unknown, ctx: ToolContext): Promise<u
       const p = requirePart(a.car_id, a.part_id);
       const skus = getSpareParts(a.car_id, a.part_id);
       if (!skus.length) return { part_id: p.id, available: false, note: "Not sold in the parts store (structural/specialist part). Recommend a shop instead." };
-      return { part_id: p.id, part: p.name, skus: skus.map((s) => ({ sku: s.sku, tier: s.tier, brand: s.brand, price_usd: s.price, warranty: s.warranty, in_stock: s.inStock, ships_in_days: s.shipDays })) };
+      return { part_id: p.id, part: p.name, skus: skus.map(skuBrief) };
     }
     case "find_repair_shops": {
       const a = schemas.find_repair_shops.parse(input);
       const shops = findShops({ specialty: a.specialty, maxKm: a.max_km, lat: loc.lat, lng: loc.lng });
       return {
         near: ctx.view.location ? "user's location" : DEFAULT_LOCATION.label,
-        shops: shops.map((s) => ({ shop_id: s.id, name: s.name, specialties: s.specialties, rating: s.rating, distance_km: s.distanceKm, labor_rate_usd_hr: s.laborRate, deposit_usd: s.deposit, next_slots: s.nextSlots })),
+        shops: shops.map(shopBrief),
       };
     }
     case "find_technicians": {
       const a = schemas.find_technicians.parse(input);
       return {
-        technicians: findTechnicians(a.skill).map((t) => ({ technician_id: t.id, name: t.name, skills: t.skills, certified: t.certified, rating: t.rating, callout_fee_usd: t.calloutFee, hourly_rate_usd: t.hourlyRate, eta_minutes: t.etaMinutes })),
+        technicians: findTechnicians(a.skill).map(technicianBrief),
       };
     }
     case "recommend_actions": {
       const a = schemas.recommend_actions.parse(input);
-      const actions: RecommendedAction[] = a.actions.map((x) => {
-        const part = x.part_id ? requirePart(a.car_id, x.part_id) : undefined;
-        const out: RecommendedAction = {
-          type: x.type,
-          title: x.title,
-          why: x.why,
-          urgency: x.urgency,
-          part: part ? { id: part.id, name: part.name } : undefined,
-          steps: x.steps,
-          toolsNeeded: x.tools_needed,
-          estCost: x.est_cost_usd,
-        };
-        if (x.type === "buy_part") {
-          if (!part) throw new ToolInputError("buy_part needs part_id.");
-          const skus = getSpareParts(a.car_id, part.id);
-          if (!skus.length) throw new ToolInputError(`${part.name} isn't sold in the parts store; offer reserve_shop instead.`);
-          out.skus = skus;
-        }
-        if (x.type === "book_technician") {
-          const t = x.technician_id ? getTechnician(x.technician_id) : undefined;
-          if (!t) throw new ToolInputError("book_technician needs a technician_id from find_technicians.");
-          out.technician = t;
-        }
-        if (x.type === "reserve_shop") {
-          const s = x.shop_id ? getShop(x.shop_id, loc.lat, loc.lng) : undefined;
-          if (!s) throw new ToolInputError("reserve_shop needs a shop_id from find_repair_shops.");
-          out.shop = s;
-        }
-        return out;
-      });
+      const actions = buildRecommendations(a.car_id, a.actions, loc);
       ctx.emit({ type: "recommendations", carId: a.car_id, headline: a.headline, actions });
       return { shown: actions.length, note: "The user can pay or book directly from these cards via PayPal." };
+    }
+    case "prepare_action": {
+      const a = schemas.prepare_action.parse(input);
+      const action = prepareAction(ctx.sessionId, actionPayload(a, ctx.view.location), { source: "app" });
+      const oneTap = !oneTapBlocker(action, ctx.sessionId);
+      ctx.emit({ type: "action", action, oneTap });
+      return {
+        prepared: action.title,
+        total_usd: action.amount,
+        policy: action.policy,
+        one_tap: oneTap,
+        note: "Shown as a confirm card. Nothing is charged until the user taps Confirm. Don't say it's paid; call get_orders if they ask.",
+      };
     }
     case "get_orders": {
       schemas.get_orders.parse(input ?? {});
       const tx = listTransactions(ctx.sessionId);
+      const waiting = listActions(ctx.sessionId).filter((x) => x.status === "pending");
       return {
+        waiting_for_confirmation: waiting.map((x) => ({ title: x.title, amount_usd: x.amount, expires: x.expiresAt })),
         orders: tx.slice(0, 10).map((t) => ({
           kind: t.kind,
           title: t.title,
@@ -278,7 +346,7 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
     if (e instanceof z.ZodError) {
       return { content: `Invalid input: ${e.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`, isError: true };
     }
-    if (e instanceof ToolInputError) return { content: e.message, isError: true };
+    if (e instanceof ToolInputError || e instanceof CommerceError) return { content: e.message, isError: true };
     console.error("[tool]", name, e);
     return { content: "Tool failed unexpectedly.", isError: true };
   }

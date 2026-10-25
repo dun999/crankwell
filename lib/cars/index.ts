@@ -41,6 +41,27 @@ export function getPart(carId: CarId, partId: string): PartDetails | undefined {
   };
 }
 
+const SYSTEM_CODE: Record<CarModel["parts"][number]["system"], string> = {
+  body: "BDY", engine: "ENG", intake: "AIR", exhaust: "EXH", cooling: "COL", electrical: "ELC", fuel: "FUL",
+  transmission: "TRN", drivetrain: "DRV", brakes: "BRK", suspension: "SUS", steering: "STR", wheels: "WHL", interior: "INT",
+};
+const codes = new Map<CarId, Map<string, string>>();
+
+/** Short catalog number for a part, e.g. "BRK·04": its system and its place in that system. */
+export function partCode(carId: CarId, partId: string): string {
+  let m = codes.get(carId);
+  if (!m) {
+    m = new Map();
+    const seen: Record<string, number> = {};
+    for (const p of getCar(carId).parts) {
+      seen[p.system] = (seen[p.system] ?? 0) + 1;
+      m.set(p.id, `${SYSTEM_CODE[p.system]}·${String(seen[p.system]).padStart(2, "0")}`);
+    }
+    codes.set(carId, m);
+  }
+  return m.get(partId) ?? "";
+}
+
 export function carDisplayName(id: CarId): string {
   const s = CAR_SPECS[id];
   return `${s.make} ${s.model}`;

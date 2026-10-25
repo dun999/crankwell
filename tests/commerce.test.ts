@@ -3,7 +3,7 @@ import { getSpareParts } from "@/lib/catalog/spare-parts";
 
 // PayPal is mocked: these tests cover our order logic, pricing and webhook state machine.
 const pp = vi.hoisted(() => ({
-  createOrder: vi.fn(async (i: { referenceId: string }) => ({ id: `ORDER-${i.referenceId.slice(-6)}`, status: "CREATED" })),
+  createOrder: vi.fn(async (i: { referenceId: string }) => ({ orderId: `ORDER-${i.referenceId.slice(-6)}`, status: "PAYER_ACTION_REQUIRED", approveUrl: "https://www.sandbox.paypal.com/checkoutnow?token=X" })),
   captureOrder: vi.fn(async () => ({ status: "COMPLETED", captureId: "CAP-1", captureStatus: "COMPLETED", payer: "buyer@example.com" })),
   authorizeOrder: vi.fn(async () => ({ status: "COMPLETED", authorizationId: "AUTH-1", authorizationStatus: "CREATED", expires: "2026-10-09T00:00:00Z" })),
   captureAuthorization: vi.fn(async () => ({ captureId: "CAP-AUTH-1", status: "COMPLETED" })),
@@ -18,6 +18,8 @@ vi.mock("@/lib/server/paypal", () => ({
   paypalErrorMessage: (e: Error) => e.message,
   getInvoice: vi.fn(),
   cancelInvoice: vi.fn(),
+  deletePaymentToken: vi.fn(),
+  RestError: class extends Error {},
 }));
 
 const commerce = await import("@/lib/server/commerce");

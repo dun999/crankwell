@@ -4,7 +4,7 @@ import { AgGridReact } from "ag-grid-react";
 import clsx from "clsx";
 import { Crosshair, MessageCircle, Search, Table2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getCar, getPart } from "@/lib/cars";
+import { getCar, getPart, partCode } from "@/lib/cars";
 import { SYSTEM_IDS, SYSTEM_META, type CarId, type SystemId } from "@/lib/cars/types";
 import { useMediaQuery } from "@/lib/hooks";
 import { useChat } from "@/lib/store/chat";
@@ -14,6 +14,7 @@ import { IconButton, Modal, money } from "../ui";
 
 interface Row {
   id: string;
+  code: string;
   name: string;
   system: SystemId;
   partMin: number;
@@ -34,6 +35,7 @@ function rowsFor(carId: CarId): Row[] {
     const d = getPart(carId, p.id)!;
     return {
       id: d.id,
+      code: partCode(carId, d.id),
       name: d.name,
       system: d.system,
       partMin: d.price.partMin,
@@ -59,7 +61,7 @@ function PartCell({ data }: ICellRendererParams<Row>) {
       <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: meta.color }} />
       <span className="min-w-0">
         <span className="block truncate font-medium text-ink">{data.name}</span>
-        <span className="block truncate text-[11px] text-muted">{meta.label}{data.unit ? ` · ${data.unit}` : ""}</span>
+        <span className="block truncate text-[11px] text-muted"><span className="mono text-[10.5px] text-faint">{data.code}</span> · {meta.label}{data.unit ? ` · ${data.unit}` : ""}</span>
       </span>
     </span>
   );
@@ -105,7 +107,7 @@ export function PriceGuide() {
   const docked = useMediaQuery("(min-width: 1024px)");
   if (!open) return null;
   const close = () => useScene.getState().setGuideOpen(false);
-  if (docked) return <section className="guide-dock card" aria-label="Price guide"><GuideBody docked onClose={close} /></section>;
+  if (docked) return <section className="guide-dock" aria-label="Price guide"><GuideBody docked onClose={close} /></section>;
   return (
     <Modal label="Price guide" className="guide-dialog" onClose={close} focusDialog>
       <GuideBody docked={false} onClose={close} />
@@ -173,21 +175,21 @@ function GuideBody({ docked, onClose }: { docked: boolean; onClose: () => void }
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line py-2 pl-3 pr-2">
         <div className="flex min-w-0 items-center gap-2.5">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-surface-3 text-ink"><Table2 size={16} strokeWidth={1.75} /></span>
-          <h2 className="text-sm font-semibold tracking-[-0.01em]">Price guide</h2>
-          <span className="rounded-full bg-surface-3 px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted">{shown ?? total}/{total}</span>
+          <Table2 size={15} strokeWidth={1.75} className="shrink-0 text-muted" />
+          <h2 className="fig text-ink">Price guide</h2>
+          <span className="mono text-[10.5px] text-faint">{shown ?? total}/{total}</span>
         </div>
         <div className="order-last flex min-w-0 basis-full items-center justify-end gap-1.5 sm:order-none sm:ml-auto sm:flex-1 sm:basis-auto">
-          <label className="field flex h-9 min-w-[120px] flex-1 items-center gap-2 rounded-xl border border-line bg-surface-2 px-2.5 focus-within:border-accent sm:max-w-[240px]">
+          <label className="field flex h-8 min-w-[120px] flex-1 items-center gap-2 rounded-lg border border-line bg-surface-2 px-2.5 focus-within:border-accent sm:max-w-[240px]">
             <Search size={14} className="shrink-0 text-muted" />
             <input aria-label="Filter parts or symptoms" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter parts or symptoms" className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted" />
           </label>
-          <select aria-label="System" value={system} onChange={(e) => setSystem(e.target.value as SystemId | "all")} className="h-9 w-[132px] min-w-0 shrink rounded-xl border border-line bg-surface-solid px-2 text-[13px]">
+          <select aria-label="System" value={system} onChange={(e) => setSystem(e.target.value as SystemId | "all")} className="h-8 w-[132px] min-w-0 shrink rounded-lg border border-line bg-surface-solid px-2 text-[13px]">
             <option value="all">All systems</option>
             {SYSTEM_IDS.filter((s) => rows.some((r) => r.system === s)).map((s) => <option key={s} value={s}>{SYSTEM_META[s].label}</option>)}
           </select>
           <button type="button" aria-pressed={soldOnly} onClick={() => setSoldOnly(!soldOnly)}
-            className={clsx("h-9 shrink-0 whitespace-nowrap rounded-xl border px-3 text-[13px] font-medium transition-colors", soldOnly ? "border-transparent bg-primary text-primary-ink" : "border-line bg-surface-solid text-muted hover:text-ink")}>
+            className={clsx("h-8 shrink-0 whitespace-nowrap rounded-lg border px-3 text-[13px] font-medium transition-colors", soldOnly ? "border-transparent bg-primary text-primary-ink" : "border-line bg-surface-solid text-muted hover:text-ink")}>
             In store
           </button>
         </div>
@@ -236,7 +238,7 @@ function GuideBody({ docked, onClose }: { docked: boolean; onClose: () => void }
           <p role="status" className="pointer-events-none absolute inset-x-0 top-[46%] text-center text-sm text-muted">No parts match these filters.</p>
         )}
       </div>
-      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-line px-4 py-2 text-[11px] text-muted">
+      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-line px-3 py-1.5 text-[11px] text-muted">
         <span>Typical 2026 US prices, not quotes. Labor varies by shop.</span>
         <span className="hidden sm:inline">{docked ? "Hover a row to find it on the car · click to fly there" : "Tap a row to see it on the car"}</span>
       </footer>

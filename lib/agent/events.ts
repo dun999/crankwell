@@ -1,5 +1,5 @@
 import type { CarId, SystemId } from "@/lib/cars/types";
-import type { RepairShop, SparePart, Technician } from "@/lib/commerce/types";
+import type { Action, RepairShop, SparePart, Technician } from "@/lib/commerce/types";
 
 // Events the agent route streams to the browser (Server-Sent Events).
 
@@ -51,7 +51,24 @@ export type UiEvent =
       suspects: Suspect[];
     }
   | { type: "safety_tests"; intro: string; tests: SafetyTest[] }
-  | { type: "recommendations"; carId: CarId; headline: string; actions: RecommendedAction[] };
+  | { type: "recommendations"; carId: CarId; headline: string; actions: RecommendedAction[] }
+  | { type: "action"; action: Action; oneTap: boolean };
+
+/** A diagnosis saved for a deep link (/app?case=<id>), e.g. one made in Claude through the MCP connector. */
+export interface DiagnosisCase {
+  id: string;
+  source: "claude" | "app";
+  carId: CarId;
+  /** The user's own car when it differs from the reference model, e.g. "2017 Honda Civic". */
+  vehicle?: string;
+  title: string;
+  summary: string;
+  severity: Severity;
+  driveSafety: DriveSafety;
+  suspects: Suspect[];
+  options?: { headline: string; actions: RecommendedAction[] };
+  createdAt: string;
+}
 
 export type StreamEvent =
   | { event: "text"; data: { delta: string } }

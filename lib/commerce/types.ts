@@ -102,3 +102,46 @@ export interface Technician {
   etaMinutes: number;
   certified: string;
 }
+
+// ───────────────────────── Agent-prepared actions ─────────────────────────
+
+/** What the agent proposes. The server prices it from the catalog; only the user can confirm it. */
+export type ActionPayload =
+  | { kind: "parts"; carId: string; partId: string; items: { sku: string; quantity: number }[] }
+  | { kind: "shop_deposit"; carId: string; partId?: string; shopId: string; slot: string; issue?: string; location?: { lat: number; lng: number } | null }
+  | { kind: "technician_invoice"; carId: string; partId?: string; technicianId: string; when: string; hours: number; issue?: string; email?: string };
+
+export type ActionStatus = "pending" | "confirming" | "confirmed" | "expired" | "cancelled";
+
+export interface ActionLine {
+  label: string;
+  amount: string;
+}
+
+export interface Action {
+  id: string;
+  kind: TxKind;
+  status: ActionStatus;
+  source: "app" | "claude";
+  caseId?: string;
+  title: string;
+  summary: string;
+  lines: ActionLine[];
+  amount: string;
+  /** "Charged now", "Held, not charged" or "Invoice after the visit". */
+  policy: string;
+  payload: ActionPayload;
+  txId?: string;
+  /** How it was confirmed: one tap with saved PayPal, PayPal approval, or a sent invoice. */
+  via?: "vault" | "approval" | "invoice";
+  error?: string;
+  createdAt: string;
+  expiresAt: string;
+  confirmedAt?: string;
+}
+
+/** Saved PayPal for one-tap, as the browser sees it (the vault token stays on the server). */
+export interface WalletInfo {
+  email?: string;
+  savedAt: string;
+}

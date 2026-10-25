@@ -39,15 +39,17 @@ export function CarModel({ carId, dark, onBuilt }: { carId: CarId; dark: boolean
       setProgress(null);
       setBuilt(c);
       onBuilt?.(c);
+      useScene.setState({ ready: c.id });
       if (process.env.NODE_ENV !== "production") Object.assign(window, { __ready: c.id });
     });
     return () => {
       alive = false;
+      useScene.setState({ ready: null });
     };
   }, [carId, setProgress, onBuilt]);
 
   const materials = useMemo(() => materialsFor(carId), [carId]);
-  const xray = useMemo(() => createXrayMaterial(dark ? "#6fb6f2" : "#475569", dark ? 0.2 : 0.26), [dark]);
+  const xray = useMemo(() => createXrayMaterial(dark ? "#6fb6f2" : "#2f5a9a", dark ? 0.2 : 0.26), [dark]);
   const glow = useMemo(
     () => ({
       "#ff3b30": createGlowMaterial("#ff3b30"),

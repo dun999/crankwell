@@ -1,5 +1,6 @@
 import "server-only";
 import Database from "better-sqlite3";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Transaction, TxEvent } from "@/lib/commerce/types";
@@ -45,9 +46,64 @@ export function db(): DB {
       received_at TEXT NOT NULL,
       payload TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS actions (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      case_id TEXT,
+      status TEXT NOT NULL,
+      tx_id TEXT,
+      data TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS action_session ON actions(session_id);
+    CREATE INDEX IF NOT EXISTS action_case ON actions(case_id);
+    CREATE TABLE IF NOT EXISTS wallets (
+      session_id TEXT PRIMARY KEY,
+      vault_id TEXT NOT NULL,
+      customer_id TEXT,
+      payer_email TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS cases (
+      id TEXT PRIMARY KEY,
+      session_id TEXT,
+      data TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS oauth_clients (
+      id TEXT PRIMARY KEY,
+      data TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS oauth_codes (
+      hash TEXT PRIMARY KEY,
+      data TEXT NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS oauth_tokens (
+      hash TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      grant_id TEXT NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS oauth_token_session ON oauth_tokens(session_id);
+    CREATE INDEX IF NOT EXISTS oauth_token_grant ON oauth_tokens(grant_id);
+    CREATE TABLE IF NOT EXISTS secrets (
+      name TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
   g.__fycDb = d;
   return d;
+}
+
+/** A random server secret, created on first use and kept with the data it protects. */
+export function serverSecret(name: string): Buffer {
+  const d = db();
+  d.prepare("INSERT OR IGNORE INTO secrets (name, value) VALUES (?, ?)").run(name, randomBytes(32).toString("base64url"));
+  return Buffer.from((d.prepare("SELECT value FROM secrets WHERE name = ?").get(name) as { value: string }).value, "base64url");
 }
 
 // ───────────────────────── Conversations ─────────────────────────

@@ -17,6 +17,8 @@ const EVENTS = [
   "INVOICING.INVOICE.PAID",
   "INVOICING.INVOICE.CANCELLED",
   "INVOICING.INVOICE.UPDATED",
+  "VAULT.PAYMENT-TOKEN.CREATED",
+  "VAULT.PAYMENT-TOKEN.DELETED",
 ];
 
 if (fs.existsSync(".env.local")) process.loadEnvFile(".env.local");

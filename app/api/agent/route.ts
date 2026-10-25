@@ -2,7 +2,9 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { encodeSse, type StreamEvent } from "@/lib/agent/events";
 import { runAgentTurn } from "@/lib/agent/loop";
+import { agentKey } from "@/lib/agent/model";
 import { Session, json } from "@/lib/server/http";
+import { rateLimit } from "@/lib/server/ratelimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +22,7 @@ const Body = z.object({
 });
 
 function friendly(e: unknown): string {
-  if (e instanceof OpenAI.AuthenticationError) return "The AI mechanic isn't configured: set NEBIUS_API_KEY in .env.local.";
+  if (e instanceof OpenAI.AuthenticationError) return "The AI mechanic isn't configured: set AGENT_API_KEY in .env.local.";
   if (e instanceof OpenAI.RateLimitError) return "The AI mechanic is busy right now (rate limited). Please try again in a moment.";
   if (e instanceof OpenAI.APIError) return `AI service error (${e.status ?? "network"}). Please try again.`;
   return "Something went wrong while thinking. Please try again.";
@@ -28,10 +30,12 @@ function friendly(e: unknown): string {
 
 /** Streams one agent turn as Server-Sent Events: text, progress updates, tool status and UI events. */
 export async function POST(req: Request) {
+  const limited = rateLimit(req, "agent", 20);
+  if (limited) return limited;
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return json({ error: "Invalid request" }, 400);
-  if (!process.env.NEBIUS_API_KEY) {
-    return json({ error: "The AI mechanic isn't configured: set NEBIUS_API_KEY in .env.local and restart the dev server." }, 503);
+  if (!agentKey()) {
+    return json({ error: "The AI mechanic isn't configured: set AGENT_API_KEY in .env.local and restart the dev server." }, 503);
   }
   const b = parsed.data;
   const enc = new TextEncoder();

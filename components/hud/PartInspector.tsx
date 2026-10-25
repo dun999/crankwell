@@ -2,7 +2,8 @@
 import { Crosshair, Focus, MessageCircle, ShoppingCart, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { getPart } from "@/lib/cars";
+import { getPart, partCode } from "@/lib/cars";
+import { confidenceColor } from "@/lib/confidence";
 import { SYSTEM_META } from "@/lib/cars/types";
 import { useChat } from "@/lib/store/chat";
 import { useScene } from "@/lib/store/scene";
@@ -34,63 +35,61 @@ export function PartInspector({ onNavigate }: { onNavigate?: () => void }) {
   const p = part.price;
   const scene = useScene.getState();
 
+  const code = partCode(carId, part.id);
+  const spec: [string, string][] = [
+    ["Part price", p.partMax > 0 ? `${money(p.partMin)}–${money(p.partMax)}` : "Not sold"],
+    ["Shop labor", p.laborMax > 0 ? `${money(p.laborMin)}–${money(p.laborMax)}` : "—"],
+    ["DIY difficulty", ""],
+    ...(tpl.lifespan ? [["Typical life", tpl.lifespan] as [string, string]] : []),
+  ];
+
   return (
     <section className="part-inspector flex min-h-0 flex-1 flex-col overflow-hidden" aria-label="Part details">
-      <div className="flex shrink-0 items-start gap-2 px-4 pt-4">
+      <header className="flex shrink-0 items-start gap-2 border-b border-line py-2.5 pl-3.5 pr-1.5">
         <div className="min-w-0 flex-1">
-          <Chip color={meta.color}>
+          <div className="fig flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 rounded-full" style={{ background: meta.color }} />
-            {meta.label}
-          </Chip>
-          <h2 className="mt-2 text-[17px] font-semibold leading-snug tracking-[-0.015em]">{part.name}</h2>
+            {code} · {meta.label}
+          </div>
+          <h2 className="mt-1 text-[16px] font-semibold leading-snug tracking-[-0.02em]">{part.name}</h2>
         </div>
-        <IconButton label="Close part details" onClick={() => scene.select(null)} className="-mr-2 -mt-1">
+        <IconButton label="Close part details" onClick={() => scene.select(null)}>
           <X size={16} />
         </IconButton>
-      </div>
+      </header>
 
-      <div className="scroll-thin min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-3 pt-2 text-[13px]">
+      <div className="scroll-thin min-h-0 flex-1 space-y-3.5 overflow-y-auto px-3.5 pb-3 pt-3 text-[13px]">
         {confidence !== undefined && (
-          <div className="rounded-xl border border-danger/20 bg-danger/5 px-3 py-2.5">
-            <div className="eyebrow">Diagnosis confidence</div>
-            <div className="mt-1 flex items-center gap-2">
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--border-strong)]">
-                <div className="h-full rounded-full bg-danger" style={{ width: `${Math.round(confidence * 100)}%` }} />
-              </div>
-              <span className="font-semibold tabular-nums">{Math.round(confidence * 100)}%</span>
+          <div className="flex items-center gap-2.5 rounded-lg border border-line px-2.5 py-2">
+            <span className="fig shrink-0">Suspect</span>
+            <div className="h-1 flex-1 overflow-hidden rounded-full bg-[var(--border)]">
+              <div className="h-full rounded-full" style={{ width: `${Math.round(confidence * 100)}%`, background: confidenceColor(confidence) }} />
             </div>
+            <span className="mono text-[12px] font-semibold" style={{ color: confidenceColor(confidence) }}>{Math.round(confidence * 100)}%</span>
           </div>
         )}
         <p className="leading-relaxed text-ink/90">{part.purpose}</p>
 
-        <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-xl bg-surface-2 px-3 py-2.5">
-            <div className="text-[11px] text-muted">Part price</div>
-            <div className="font-semibold tabular-nums">{p.partMax > 0 ? `${money(p.partMin)}–${money(p.partMax)}` : "Not sold"}</div>
-          </div>
-          <div className="rounded-xl bg-surface-2 px-3 py-2.5">
-            <div className="text-[11px] text-muted">Shop labor</div>
-            <div className="font-semibold tabular-nums">{p.laborMax > 0 ? `${money(p.laborMin)}–${money(p.laborMax)}` : "—"}</div>
-          </div>
-        </div>
-        {p.unit && <div className="-mt-1 text-[11px] text-muted">Prices: {p.unit}. Typical 2026 US market range (estimate).</div>}
+        <dl className="divide-y divide-[var(--border)] border-y border-line">
+          {spec.map(([k, v]) => (
+            <div key={k} className="flex min-h-8 items-center justify-between gap-3 py-1.5">
+              <dt className="text-muted">{k}</dt>
+              <dd className="mono text-right text-[12px]">
+                {k === "DIY difficulty" ? (
+                  <span className="flex items-center gap-2">
+                    <Dots value={tpl.diy} color={tpl.diy >= 4 ? "var(--danger)" : tpl.diy >= 3 ? "var(--warn)" : "var(--ok)"} />
+                    <span className="text-muted">{["", "Easy", "Basic tools", "Moderate", "Advanced", "Shop only"][tpl.diy]}</span>
+                  </span>
+                ) : v}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        {p.unit && <div className="-mt-2 text-[11px] text-muted">Prices {p.unit}. Typical 2026 US range, estimate.</div>}
 
-        <div className="flex items-center justify-between">
-          <span className="text-muted">DIY difficulty</span>
-          <span className="flex items-center gap-2">
-            <Dots value={tpl.diy} color={tpl.diy >= 4 ? "var(--danger)" : tpl.diy >= 3 ? "var(--warn)" : "var(--ok)"} />
-            <span className="text-xs text-muted">{["", "Easy", "Basic tools", "Moderate", "Advanced", "Shop only"][tpl.diy]}</span>
-          </span>
-        </div>
-        {tpl.lifespan && (
-          <div className="flex items-center justify-between">
-            <span className="text-muted">Typical life</span>
-            <span>{tpl.lifespan}</span>
-          </div>
-        )}
         <div>
-          <div className="mb-1.5 text-muted">Common symptoms when it fails</div>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="fig mb-1.5">Symptoms when it fails</div>
+          <div className="flex flex-wrap gap-1">
             {tpl.symptoms.map((s) => (
               <Chip key={s}>{s}</Chip>
             ))}
@@ -101,7 +100,7 @@ export function PartInspector({ onNavigate }: { onNavigate?: () => void }) {
         </div>}
       </div>
 
-      <div className="flex shrink-0 flex-wrap gap-1.5 border-t border-line px-3 py-2.5">
+      <div className="flex shrink-0 flex-wrap gap-1 border-t border-line px-2 py-2">
         <Button size="sm" variant="ghost" onClick={() => { scene.focusParts([part.id], false); onNavigate?.(); }}>
           <Crosshair size={14} /> Focus
         </Button>

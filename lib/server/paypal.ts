@@ -8,14 +8,19 @@ import {
   OrdersController,
   PaymentsController,
   PaypalExperienceUserAction,
+  PaypalPaymentTokenCustomerType,
+  PaypalPaymentTokenUsageType,
   PaypalWalletContextShippingPreference,
+  StoreInVaultInstruction,
+  type Order,
   type OrderRequest,
+  type PaypalWallet,
 } from "@paypal/paypal-server-sdk";
 
 // PayPal integration (sandbox by default).
 //  - Orders v2 + Payments v2 go through the official Server SDK.
-//  - Invoicing v2 and webhook signature verification aren't in the Server
-//    SDK, so they use the REST API directly with the same OAuth credentials.
+//  - Invoicing v2, Vault token deletion and webhook signature verification
+//    use the REST API directly with the same OAuth credentials.
 
 export class PayPalNotConfigured extends Error {
   constructor() {
@@ -110,6 +115,35 @@ export interface OrderLine {
   physical: boolean;
 }
 
+/** Save the buyer's PayPal for one-tap on approval, or pay with a wallet saved earlier. */
+export type VaultOption = { save: true } | { vaultId: string };
+
+export interface VaultInfo {
+  id: string;
+  status?: string;
+  customerId?: string;
+}
+
+/** What happened to an order: payer action needed, or captured/authorized right away (saved wallet). */
+export function orderOutcome(o: Order) {
+  const pay = o.purchaseUnits?.[0]?.payments;
+  const cap = pay?.captures?.[0];
+  const auth = pay?.authorizations?.[0];
+  const v = o.paymentSource?.paypal?.attributes?.vault;
+  return {
+    orderId: o.id!,
+    status: o.status,
+    approveUrl: o.links?.find((l) => l.rel === "payer-action" || l.rel === "approve")?.href,
+    captureId: cap?.id,
+    captureStatus: cap?.status,
+    authorizationId: auth?.id,
+    authorizationStatus: auth?.status,
+    expires: auth?.expirationTime,
+    payer: o.paymentSource?.paypal?.emailAddress ?? o.payer?.emailAddress,
+    vault: v?.id ? ({ id: v.id, status: v.status, customerId: v.customer?.id } satisfies VaultInfo) : undefined,
+  };
+}
+
 export async function createOrder(input: {
   referenceId: string;
   intent: "CAPTURE" | "AUTHORIZE";
@@ -119,6 +153,7 @@ export async function createOrder(input: {
   needsShipping: boolean;
   returnUrl: string;
   cancelUrl: string;
+  vault?: VaultOption;
 }) {
   const itemTotal = input.lines.reduce((a, l) => a + l.unitPrice * l.quantity, 0);
   const body: OrderRequest = {
@@ -143,32 +178,51 @@ export async function createOrder(input: {
         })),
       },
     ],
-    paymentSource: {
-      paypal: {
-        experienceContext: {
-          brandName: "Crankwell",
-          shippingPreference: input.needsShipping ? PaypalWalletContextShippingPreference.GetFromFile : PaypalWalletContextShippingPreference.NoShipping,
-          userAction: PaypalExperienceUserAction.PayNow,
-          returnUrl: input.returnUrl,
-          cancelUrl: input.cancelUrl,
-        },
-      },
-    },
+    paymentSource: { paypal: walletSource(input) },
   };
   const { result } = await sdk().orders.createOrder({ body, prefer: "return=representation", paypalRequestId: `${input.referenceId}-create` });
-  return result;
+  return orderOutcome(result);
+}
+
+function walletSource(input: { needsShipping: boolean; returnUrl: string; cancelUrl: string; vault?: VaultOption }): PaypalWallet {
+  // A saved wallet pays without a buyer redirect, so it needs no experience context.
+  if (input.vault && "vaultId" in input.vault) return { vaultId: input.vault.vaultId };
+  return {
+    experienceContext: {
+      brandName: "Crankwell",
+      shippingPreference: input.needsShipping ? PaypalWalletContextShippingPreference.GetFromFile : PaypalWalletContextShippingPreference.NoShipping,
+      userAction: PaypalExperienceUserAction.PayNow,
+      returnUrl: input.returnUrl,
+      cancelUrl: input.cancelUrl,
+    },
+    attributes: input.vault
+      ? {
+          vault: {
+            storeInVault: StoreInVaultInstruction.OnSuccess,
+            usageType: PaypalPaymentTokenUsageType.Merchant,
+            customerType: PaypalPaymentTokenCustomerType.Consumer,
+            description: "Crankwell one-tap checkout",
+          },
+        }
+      : undefined,
+  };
 }
 
 export async function captureOrder(orderId: string, requestId: string) {
   const { result } = await sdk().orders.captureOrder({ id: orderId, prefer: "return=representation", paypalRequestId: requestId });
-  const cap = result.purchaseUnits?.[0]?.payments?.captures?.[0];
-  return { status: result.status, captureId: cap?.id, captureStatus: cap?.status, payer: result.payer?.emailAddress };
+  return orderOutcome(result);
 }
 
 export async function authorizeOrder(orderId: string, requestId: string) {
   const { result } = await sdk().orders.authorizeOrder({ id: orderId, prefer: "return=representation", paypalRequestId: requestId });
-  const auth = result.purchaseUnits?.[0]?.payments?.authorizations?.[0];
-  return { status: result.status, authorizationId: auth?.id, authorizationStatus: auth?.status, expires: auth?.expirationTime };
+  return orderOutcome(result);
+}
+
+// ───────────────────────── Vault v3 (REST) ─────────────────────────
+
+/** Remove a saved PayPal wallet (payment token). */
+export async function deletePaymentToken(id: string) {
+  await paypalRest(`/v3/vault/payment-tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 // ───────────────────────── Payments v2 ─────────────────────────

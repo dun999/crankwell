@@ -126,7 +126,7 @@ try {
 
   const search = page.getByRole("button", { name: "Search parts (Ctrl+K)", exact: true });
   await search.click();
-  const input = page.getByRole("textbox", { name: "Search parts or symptoms", exact: true });
+  const input = page.getByRole("textbox", { name: "Search parts, actions or ask the mechanic", exact: true });
   await input.fill("zzzz-no-match");
   await input.press("ArrowDown");
   await input.fill("12 V battery");
@@ -248,8 +248,8 @@ try {
   await fallback.goto(url);
   await fallback.getByText("3D viewing is unavailable", { exact: true }).waitFor();
   await fallback.getByRole("button", { name: "Search parts (Ctrl+K)", exact: true }).click();
-  await fallback.getByRole("textbox", { name: "Search parts or symptoms", exact: true }).fill("battery");
-  await fallback.getByRole("button", { name: /12 V battery/ }).waitFor();
+  await fallback.getByRole("textbox", { name: "Search parts, actions or ask the mechanic", exact: true }).fill("battery");
+  await fallback.getByRole("option", { name: /12 V battery/ }).waitFor();
   report.checks.push("WebGL failure leaves the app and parts search usable");
   assert.deepEqual(report.errors, []);
   console.log(JSON.stringify(report.checks, null, 2));

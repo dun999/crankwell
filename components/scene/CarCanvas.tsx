@@ -11,7 +11,7 @@ import { CarModel } from "./CarModel";
 import { Studio } from "./Studio";
 import { RenderActivity } from "./RenderActivity";
 
-export default function CarCanvas({ dark }: { dark: boolean }) {
+export default function CarCanvas({ dark, story = false }: { dark: boolean; story?: boolean }) {
   const carId = useScene((s) => s.carId);
   const quality = useScene((s) => s.quality);
   const [built, setBuilt] = useState<BuiltCar | null>(null);
@@ -62,7 +62,7 @@ export default function CarCanvas({ dark }: { dark: boolean }) {
           <SMAA />
         </EffectComposer>
       </Selection>
-      <CameraRig built={built && built.id === carId ? built : null} />
+      <CameraRig built={built && built.id === carId ? built : null} story={story} />
     </Canvas>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 import clsx from "clsx";
-import { ExternalLink, Receipt, RefreshCw, Webhook, X } from "lucide-react";
+import { ExternalLink, Link2, Receipt, RefreshCw, Webhook, X, Zap } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { commerce } from "@/lib/commerce/client";
@@ -48,8 +48,8 @@ function TxDetail({ tx }: { tx: Transaction }) {
         </div>
       </div>
       <div className="flex items-end justify-between gap-2">
-        <div className="text-2xl font-semibold tabular-nums tracking-[-0.02em]">{money(Number(tx.amount))}</div>
-        <StatusPill status={tx.status} />
+        <div className="mono text-2xl font-semibold tracking-[-0.04em]">{money(Number(tx.amount))}</div>
+        <StatusPill key={tx.status} status={tx.status} press />
       </div>
       {tx.detail && <p className="text-xs leading-relaxed text-muted">{tx.detail}</p>}
 
@@ -143,43 +143,78 @@ function totals(items: Transaction[]) {
   ];
 }
 
+/** Saved PayPal (Vault) for one-tap, and apps paired over OAuth (Claude). Both removable here. */
+function Linked() {
+  const wallet = useOrders((s) => s.wallet);
+  const connections = useOrders((s) => s.connections);
+  const forget = useOrders((s) => s.forget);
+  const [busy, setBusy] = useState<string | null>(null);
+  if (!wallet && !connections.length) return null;
+  const remove = async (what: "wallet" | "connections") => {
+    setBusy(what);
+    try {
+      await forget(what);
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="flex shrink-0 flex-wrap gap-2 border-b border-line px-3 py-2.5 md:px-5">
+      {wallet && (
+        <span className="inline-flex items-center gap-2 rounded-full border border-line bg-surface-2 py-1 pl-2.5 pr-1 text-xs">
+          <Zap size={13} className="text-accent" /> PayPal saved for one-tap{wallet.email && <span className="text-muted">· {wallet.email}</span>}
+          <Button size="sm" variant="ghost" className="min-h-7 px-2" disabled={busy !== null} onClick={() => remove("wallet")}>Remove</Button>
+        </span>
+      )}
+      {connections.length > 0 && (
+        <span className="inline-flex items-center gap-2 rounded-full border border-line bg-surface-2 py-1 pl-2.5 pr-1 text-xs">
+          <Link2 size={13} className="text-accent" /> Connected: {connections.map((c) => c.client).join(", ")}
+          <Button size="sm" variant="ghost" className="min-h-7 px-2" disabled={busy !== null} onClick={() => remove("connections")}>Disconnect</Button>
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function OrdersDrawer() {
   const open = useOrders((s) => s.open);
   const items = useOrders((s) => s.items);
   const setOpen = useOrders((s) => s.setOpen);
   const refresh = useOrders((s) => s.refresh);
+  const refreshWallet = useOrders((s) => s.refreshWallet);
   const [picked, setPicked] = useState<string | null>(null);
   useEffect(() => {
-    if (open) void refresh();
-  }, [open, refresh]);
+    if (open) void Promise.all([refresh(), refreshWallet()]);
+  }, [open, refresh, refreshWallet]);
   const stats = useMemo(() => totals(items), [items]);
   if (!open) return null;
   const selected = items.find((t) => t.id === picked) ?? items[0];
   return (
     <Modal label="Orders and bookings" className="orders-dialog" onClose={() => setOpen(false)}>
-      <header className="flex shrink-0 items-center gap-3 border-b border-line px-5 py-3.5">
-        <span className="grid h-9 w-9 place-items-center rounded-xl bg-surface-3 text-ink"><Receipt size={18} strokeWidth={1.75} /></span>
+      <header className="flex shrink-0 items-center gap-3 border-b border-line py-2.5 pl-5 pr-3">
+        <span className="grid h-8 w-8 place-items-center rounded-md bg-surface-3 text-ink"><Receipt size={16} strokeWidth={1.75} /></span>
         <div className="min-w-0">
-          <h2 className="text-[15px] font-semibold tracking-[-0.01em]">Orders & bookings</h2>
-          <div className="flex items-center gap-1.5 text-[11px] text-muted">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#ffc439]" /> PayPal sandbox · statuses update live from PayPal
+          <h2 className="text-[15px] font-semibold tracking-[-0.015em]">Orders & bookings</h2>
+          <div className="fig flex items-center gap-1.5 text-[10px]">
+            <span className="h-1.5 w-1.5 rounded-full bg-pay" /> PayPal sandbox · live from webhooks
           </div>
         </div>
         <IconButton label="Close orders" className="ml-auto" onClick={() => setOpen(false)}>
           <X size={17} />
         </IconButton>
       </header>
+      <Linked />
       {items.length ? (
         <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
-          <dl className="grid shrink-0 grid-cols-2 gap-2 border-b border-line p-3 md:grid-cols-4 md:px-5">
-            {stats.map((s) => (
-              <div key={s.label} className="rounded-2xl border border-line bg-surface-2 px-3.5 py-2.5">
-                <dt className="flex items-center gap-1.5 text-[11px] font-medium text-muted">
+          <dl className="grid shrink-0 grid-cols-2 border-b border-line md:grid-cols-4">
+            {stats.map((s, i) => (
+              <div key={s.label} className={clsx("px-4 py-2.5 md:px-5", i % 2 === 1 && "border-l border-line", i >= 2 && "border-t border-line md:border-t-0", i === 2 && "md:border-l")}>
+                <dt className="fig flex items-center gap-1.5">
                   <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.tone }} /> {s.label}
                 </dt>
-                <dd className="mt-0.5 flex items-baseline gap-1.5">
-                  <span className="text-lg font-semibold tabular-nums tracking-[-0.02em]">{money(s.amount)}</span>
-                  <span className="text-[11px] text-faint">{s.count} {s.count === 1 ? "item" : "items"}</span>
+                <dd className="mt-1 flex items-baseline gap-1.5">
+                  <span className="mono text-[17px] font-semibold tracking-[-0.03em]">{money(s.amount)}</span>
+                  <span className="mono text-[10.5px] text-faint">×{s.count}</span>
                 </dd>
               </div>
             ))}
@@ -222,9 +257,9 @@ export function OrderToast() {
     <button
       type="button"
       onClick={() => setOpen(true)}
-      className="glass rise fixed left-1/2 top-20 z-40 flex -translate-x-1/2 items-center gap-2.5 rounded-2xl py-2 pl-2 pr-4 text-[13px] font-medium"
+      className="glass rise fixed left-1/2 top-16 z-40 flex -translate-x-1/2 items-center gap-2.5 rounded-xl py-1.5 pl-1.5 pr-3.5 text-[13px] font-medium"
     >
-      <span className="grid h-7 w-7 place-items-center rounded-xl bg-[#ffc439] text-[11px] font-bold text-[#003087]">P</span>
+      <span className="grid h-7 w-7 place-items-center rounded-md bg-pay text-[11px] font-bold text-pay-ink">P</span>
       {flash.text}
     </button>
   );

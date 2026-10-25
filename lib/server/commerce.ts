@@ -7,6 +7,7 @@ import type { Transaction, TxEvent, TxStatus } from "@/lib/commerce/types";
 import { publishTx } from "./bus";
 import { txFind, txGet, txInsert, txList, txUpdate } from "./db";
 import * as pp from "./paypal";
+import { forgetVaultToken, saveWallet } from "./wallet";
 
 export class CommerceError extends Error {
   constructor(
@@ -42,10 +43,9 @@ const RANK: Record<TxStatus, number> = {
   COMPLETED: 3, CAPTURED: 3, PAID: 3, VOIDED: 4, REFUNDED: 4, CANCELLED: 4, DENIED: 4, FAILED: 4,
 };
 
-// ───────────────────────── Parts (Orders v2, intent CAPTURE) ─────────────────────────
+// ───────────────────────── Quotes (server catalog prices only) ─────────────────────────
 
-export async function createPartsOrder(input: { sessionId: string; items: { sku: string; quantity: number }[]; carId: string; partId: string; origin: string }) {
-  if (!pp.isPayPalConfigured()) throw new pp.PayPalNotConfigured();
+export function quoteParts(input: { carId: string; partId: string; items: { sku: string; quantity: number }[] }) {
   if (!isCarId(input.carId)) throw new CommerceError("Unknown car");
   if (!input.items?.length || input.items.length > 5) throw new CommerceError("Choose 1–5 items");
   const lines = input.items.map((it) => {
@@ -58,21 +58,71 @@ export async function createPartsOrder(input: { sessionId: string; items: { sku:
   const subtotal = round2(lines.reduce((a, l) => a + l.sp.price * l.quantity, 0));
   const shipping = subtotal >= FREE_SHIPPING_OVER ? 0 : SHIPPING_FLAT;
   const part = getPart(input.carId, input.partId);
+  return {
+    lines,
+    subtotal,
+    shipping,
+    total: round2(subtotal + shipping),
+    part,
+    title: lines.length === 1 ? lines[0].sp.name : `${lines.length} parts`,
+    detail: `${lines.map((l) => `${l.quantity}× ${l.sp.tier}`).join(", ")} · ${shipping ? `shipping $${shipping}` : "free shipping"}${part ? ` · for ${part.name}` : ""}`,
+  };
+}
+
+export function quoteDeposit(input: { carId: string; shopId: string; slot: string; location?: { lat: number; lng: number } | null }) {
+  if (!isCarId(input.carId)) throw new CommerceError("Unknown car");
+  const shop = getShop(input.shopId, input.location?.lat, input.location?.lng);
+  if (!shop) throw new CommerceError("Unknown repair shop");
+  if (!shop.nextSlots.includes(input.slot)) throw new CommerceError("That time slot isn't available");
+  return { shop };
+}
+
+export function quoteTechnician(input: { carId: string; technicianId: string; hours?: number }) {
+  if (!isCarId(input.carId)) throw new CommerceError("Unknown car");
+  const tech = getTechnician(input.technicianId);
+  if (!tech) throw new CommerceError("Unknown technician");
+  const hours = Math.min(6, Math.max(1, Math.round(Number(input.hours) || 1)));
+  return { tech, hours, total: round2(tech.calloutFee + hours * tech.hourlyRate) };
+}
+
+/** Options shared by the in-app popup, the /pay page and one-tap checkout. */
+export interface CheckoutOptions {
+  origin: string;
+  /** Save PayPal for one-tap on approval, or pay with the saved wallet now. */
+  vault?: pp.VaultOption;
+  actionId?: string;
+  returnUrl?: string;
+  cancelUrl?: string;
+}
+
+const returnUrls = (o: CheckoutOptions) => ({
+  returnUrl: o.returnUrl ?? `${o.origin}/?paypal=return`,
+  cancelUrl: o.cancelUrl ?? `${o.origin}/?paypal=cancel`,
+});
+
+const paidWithSavedWallet = (o: CheckoutOptions) => Boolean(o.vault && "vaultId" in o.vault);
+
+// ───────────────────────── Parts (Orders v2, intent CAPTURE) ─────────────────────────
+
+export async function createPartsOrder(input: { sessionId: string; items: { sku: string; quantity: number }[]; carId: string; partId: string } & CheckoutOptions) {
+  if (!pp.isPayPalConfigured()) throw new pp.PayPalNotConfigured();
+  const q = quoteParts(input);
   const id = `tx_${randomUUID()}`;
   const tx: Transaction = txInsert({
     id,
     sessionId: input.sessionId,
     kind: "parts",
     status: "CREATED",
-    title: lines.length === 1 ? lines[0].sp.name : `${lines.length} parts`,
-    detail: `${lines.map((l) => `${l.quantity}× ${l.sp.tier}`).join(", ")} · ${shipping ? `shipping $${shipping}` : "free shipping"}${part ? ` · for ${part.name}` : ""}`,
-    amount: (subtotal + shipping).toFixed(2),
+    title: q.title,
+    detail: q.detail,
+    amount: q.total.toFixed(2),
     currency: "USD",
     carId: input.carId,
     partId: input.partId,
-    items: lines.map((l) => ({ sku: l.sp.sku, name: l.sp.name, quantity: l.quantity, unitPrice: l.sp.price.toFixed(2) })),
+    items: q.lines.map((l) => ({ sku: l.sp.sku, name: l.sp.name, quantity: l.quantity, unitPrice: l.sp.price.toFixed(2) })),
     paypal: {},
-    events: [{ at: now(), source: "app", type: "Order started" }],
+    meta: input.actionId ? { actionId: input.actionId } : undefined,
+    events: [{ at: now(), source: "app", type: input.actionId ? "Order prepared by the mechanic" : "Order started" }],
     createdAt: now(),
     updatedAt: now(),
   });
@@ -81,32 +131,39 @@ export async function createPartsOrder(input: { sessionId: string; items: { sku:
       referenceId: id,
       intent: "CAPTURE",
       description: `Crankwell parts: ${tx.title}`,
-      lines: lines.map((l) => ({ name: l.sp.name, sku: l.sp.sku, quantity: l.quantity, unitPrice: l.sp.price, description: `${l.sp.tier} · ${l.sp.warranty} warranty`, physical: true })),
-      shipping,
+      lines: q.lines.map((l) => ({ name: l.sp.name, sku: l.sp.sku, quantity: l.quantity, unitPrice: l.sp.price, description: `${l.sp.tier} · ${l.sp.warranty} warranty`, physical: true })),
+      shipping: q.shipping,
       needsShipping: true,
-      returnUrl: `${input.origin}/?paypal=return`,
-      cancelUrl: `${input.origin}/?paypal=cancel`,
+      ...returnUrls(input),
+      vault: input.vault,
     });
-    const next = save(id, { paypal: { orderId: order.id } }, { source: "paypal-api", type: "PayPal order created", note: `Orders v2 · ${order.status}` });
-    return { orderId: order.id!, tx: next };
+    let next = save(id, { paypal: { orderId: order.orderId } }, { source: "paypal-api", type: "PayPal order created", note: paidWithSavedWallet(input) ? "Orders v2 · saved PayPal" : `Orders v2 · ${order.status}` });
+    if (order.status === "COMPLETED") next = settleCapture(next, order, "Paid with saved PayPal · one tap");
+    return { orderId: order.orderId, approveUrl: order.approveUrl, tx: next };
   } catch (e) {
     save(id, { status: "FAILED" }, { source: "paypal-api", type: "Order creation failed", note: pp.paypalErrorMessage(e) });
     throw new CommerceError(pp.paypalErrorMessage(e), 502);
   }
 }
 
-export async function captureOrder(orderId: string, sessionId: string) {
-  const tx = ownedByOrder(orderId, sessionId);
+function settleCapture(tx: Transaction, r: ReturnType<typeof pp.orderOutcome>, label = "Payment captured") {
+  const ok = r.captureStatus === "COMPLETED" || r.captureStatus === "PENDING";
+  if (r.vault?.status === "VAULTED") saveWallet(tx.sessionId, r.vault, r.payer);
+  return save(
+    tx.id,
+    { status: ok ? "COMPLETED" : "DENIED", paypal: { captureId: r.captureId, payerEmail: r.payer } },
+    { source: "paypal-api", type: ok ? label : "Capture declined", note: `capture ${r.captureStatus}${r.vault?.status === "VAULTED" ? " · PayPal saved for one-tap" : ""}` },
+  );
+}
+
+/** Capture an approved parts order. Ownership is the session, or the PayPal order id itself on the /pay return. */
+export async function captureOrder(orderId: string, sessionId: string | null) {
+  const tx = sessionId ? ownedByOrder(orderId, sessionId) : txFind("order_id", orderId);
+  if (!tx) throw new CommerceError("Order not found", 404);
   if (tx.kind !== "parts") throw new CommerceError("This order uses authorize, not capture");
   if (tx.status === "COMPLETED") return tx;
   try {
-    const r = await pp.captureOrder(orderId, `${tx.id}-capture`);
-    const ok = r.captureStatus === "COMPLETED" || r.captureStatus === "PENDING";
-    return save(
-      tx.id,
-      { status: ok ? "COMPLETED" : "DENIED", paypal: { captureId: r.captureId, payerEmail: r.payer } },
-      { source: "paypal-api", type: ok ? "Payment captured" : "Capture declined", note: `capture ${r.captureStatus}` },
-    );
+    return settleCapture(tx, await pp.captureOrder(orderId, `${tx.id}-capture`));
   } catch (e) {
     save(tx.id, {}, { source: "paypal-api", type: "Capture failed", note: pp.paypalErrorMessage(e) });
     throw new CommerceError(pp.paypalErrorMessage(e), 502);
@@ -115,21 +172,19 @@ export async function captureOrder(orderId: string, sessionId: string) {
 
 // ───────────────────────── Shop deposit (Orders v2 AUTHORIZE → Payments v2) ─────────────────────────
 
-export async function createDepositOrder(input: {
-  sessionId: string;
-  shopId: string;
-  slot: string;
-  carId: string;
-  partId?: string;
-  issue?: string;
-  location?: { lat: number; lng: number } | null;
-  origin: string;
-}) {
+export async function createDepositOrder(
+  input: {
+    sessionId: string;
+    shopId: string;
+    slot: string;
+    carId: string;
+    partId?: string;
+    issue?: string;
+    location?: { lat: number; lng: number } | null;
+  } & CheckoutOptions,
+) {
   if (!pp.isPayPalConfigured()) throw new pp.PayPalNotConfigured();
-  if (!isCarId(input.carId)) throw new CommerceError("Unknown car");
-  const shop = getShop(input.shopId, input.location?.lat, input.location?.lng);
-  if (!shop) throw new CommerceError("Unknown repair shop");
-  if (!shop.nextSlots.includes(input.slot)) throw new CommerceError("That time slot isn't available");
+  const { shop } = quoteDeposit(input);
   const id = `tx_${randomUUID()}`;
   const tx = txInsert({
     id,
@@ -143,8 +198,8 @@ export async function createDepositOrder(input: {
     carId: input.carId,
     partId: input.partId,
     paypal: {},
-    meta: { shopId: shop.id, slot: input.slot, address: shop.address },
-    events: [{ at: now(), source: "app", type: "Reservation started" }],
+    meta: { shopId: shop.id, slot: input.slot, address: shop.address, ...(input.actionId ? { actionId: input.actionId } : {}) },
+    events: [{ at: now(), source: "app", type: input.actionId ? "Reservation prepared by the mechanic" : "Reservation started" }],
     createdAt: now(),
     updatedAt: now(),
   });
@@ -156,28 +211,34 @@ export async function createDepositOrder(input: {
       lines: [{ name: `Reservation deposit: ${shop.name}`, sku: `DEPOSIT-${shop.id}`.slice(0, 127), quantity: 1, unitPrice: shop.deposit, description: input.slot, physical: false }],
       shipping: 0,
       needsShipping: false,
-      returnUrl: `${input.origin}/?paypal=return`,
-      cancelUrl: `${input.origin}/?paypal=cancel`,
+      ...returnUrls(input),
+      vault: input.vault,
     });
-    const next = save(id, { paypal: { orderId: order.id } }, { source: "paypal-api", type: "PayPal order created", note: "Orders v2 · intent AUTHORIZE" });
-    return { orderId: order.id!, tx: next ?? tx };
+    let next = save(id, { paypal: { orderId: order.orderId } }, { source: "paypal-api", type: "PayPal order created", note: paidWithSavedWallet(input) ? "Orders v2 · intent AUTHORIZE · saved PayPal" : "Orders v2 · intent AUTHORIZE" });
+    if (order.status === "COMPLETED" && order.authorizationId) next = settleAuthorization(next, order, "Deposit held with saved PayPal · one tap");
+    return { orderId: order.orderId, approveUrl: order.approveUrl, tx: next ?? tx };
   } catch (e) {
     save(id, { status: "FAILED" }, { source: "paypal-api", type: "Order creation failed", note: pp.paypalErrorMessage(e) });
     throw new CommerceError(pp.paypalErrorMessage(e), 502);
   }
 }
 
-export async function authorizeOrder(orderId: string, sessionId: string) {
-  const tx = ownedByOrder(orderId, sessionId);
+function settleAuthorization(tx: Transaction, r: ReturnType<typeof pp.orderOutcome>, label = "Deposit authorized") {
+  if (r.vault?.status === "VAULTED") saveWallet(tx.sessionId, r.vault, r.payer);
+  return save(
+    tx.id,
+    { status: r.authorizationStatus === "CREATED" ? "AUTHORIZED" : "DENIED", paypal: { authorizationId: r.authorizationId, payerEmail: r.payer }, meta: { ...tx.meta, authExpires: r.expires } },
+    { source: "paypal-api", type: label, note: r.expires ? `hold expires ${new Date(r.expires).toLocaleDateString()}` : undefined },
+  );
+}
+
+export async function authorizeOrder(orderId: string, sessionId: string | null) {
+  const tx = sessionId ? ownedByOrder(orderId, sessionId) : txFind("order_id", orderId);
+  if (!tx) throw new CommerceError("Order not found", 404);
   if (tx.kind !== "shop_deposit") throw new CommerceError("Only reservations are authorized");
   if (tx.status === "AUTHORIZED") return tx;
   try {
-    const r = await pp.authorizeOrder(orderId, `${tx.id}-authorize`);
-    return save(
-      tx.id,
-      { status: r.authorizationStatus === "CREATED" ? "AUTHORIZED" : "DENIED", paypal: { authorizationId: r.authorizationId }, meta: { ...tx.meta, authExpires: r.expires } },
-      { source: "paypal-api", type: "Deposit authorized", note: r.expires ? `hold expires ${new Date(r.expires).toLocaleDateString()}` : undefined },
-    );
+    return settleAuthorization(tx, await pp.authorizeOrder(orderId, `${tx.id}-authorize`));
   } catch (e) {
     throw new CommerceError(pp.paypalErrorMessage(e), 502);
   }
@@ -227,15 +288,12 @@ export async function sendTechnicianInvoice(input: {
   partId?: string;
   issue?: string;
   hours?: number;
+  actionId?: string;
 }) {
   if (!pp.isPayPalConfigured()) throw new pp.PayPalNotConfigured();
-  if (!isCarId(input.carId)) throw new CommerceError("Unknown car");
-  const tech = getTechnician(input.technicianId);
-  if (!tech) throw new CommerceError("Unknown technician");
+  const { tech, hours, total } = quoteTechnician(input);
   if (!/^\S+@\S+\.\S+$/.test(input.email ?? "")) throw new CommerceError("Enter a valid email for the invoice");
-  const hours = Math.min(6, Math.max(1, Math.round(Number(input.hours) || 1)));
-  const total = tech.calloutFee + hours * tech.hourlyRate;
-  const part = input.partId ? getPart(input.carId, input.partId) : undefined;
+  const part = input.partId && isCarId(input.carId) ? getPart(input.carId, input.partId) : undefined;
   const id = `tx_${randomUUID()}`;
   txInsert({
     id,
@@ -249,8 +307,8 @@ export async function sendTechnicianInvoice(input: {
     carId: input.carId,
     partId: input.partId,
     paypal: { payerEmail: input.email },
-    meta: { technicianId: tech.id, when: input.when, hours },
-    events: [{ at: now(), source: "app", type: "Booking requested" }],
+    meta: { technicianId: tech.id, when: input.when, hours, ...(input.actionId ? { actionId: input.actionId } : {}) },
+    events: [{ at: now(), source: "app", type: input.actionId ? "Visit prepared by the mechanic" : "Booking requested" }],
     createdAt: now(),
     updatedAt: now(),
   });
@@ -318,6 +376,10 @@ type Resource = {
   invoice?: { id?: string; status?: string };
   supplementary_data?: { related_ids?: { order_id?: string; authorization_id?: string; capture_id?: string } };
   links?: { rel: string; href: string }[];
+  // Vault payment tokens
+  metadata?: { order_id?: string };
+  customer?: { id?: string };
+  payment_source?: { paypal?: { email_address?: string } };
 };
 
 function moveTo(tx: Transaction, status: TxStatus, type: string, extra: Partial<Transaction["paypal"]> = {}) {
@@ -365,6 +427,17 @@ export function applyWebhook(event: { event_type: string; resource: Resource }):
     case "PAYMENT.AUTHORIZATION.VOIDED": {
       const tx = r.id ? txFind("authorization_id", r.id) : undefined;
       return tx ? moveTo(tx, "VOIDED", "Authorization voided") : undefined;
+    }
+    case "VAULT.PAYMENT-TOKEN.CREATED": {
+      // Some approvals vault asynchronously; the token then arrives here instead of in the capture response.
+      const tx = r.metadata?.order_id ? txFind("order_id", r.metadata.order_id) : undefined;
+      if (!tx || !r.id) return undefined;
+      saveWallet(tx.sessionId, { id: r.id, status: "VAULTED", customerId: r.customer?.id }, r.payment_source?.paypal?.email_address);
+      return save(tx.id, {}, { source: "paypal-webhook", type: "PayPal saved for one-tap" });
+    }
+    case "VAULT.PAYMENT-TOKEN.DELETED": {
+      if (r.id) forgetVaultToken(r.id);
+      return undefined;
     }
     case "INVOICING.INVOICE.PAID":
     case "INVOICING.INVOICE.CANCELLED":

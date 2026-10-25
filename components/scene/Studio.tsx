@@ -7,7 +7,7 @@ import type { Quality } from "@/lib/store/scene";
 import type { BuiltCar, BuiltPart } from "@/lib/three/assemble";
 
 /** Canvas clear colors. After neutral tone mapping they match --bg in globals.css, so the studio has no visible edge. */
-export const STUDIO_BG = { light: "#fbfcff", dark: "#2c2d2f" };
+export const STUDIO_BG = { light: "#f5f3ed", dark: "#2a2b2e" };
 
 /** Soft pool of light under the car, fading to transparent. */
 function useSpotTexture(dark: boolean) {
@@ -17,7 +17,7 @@ function useSpotTexture(dark: boolean) {
     canvas.width = canvas.height = size;
     const ctx = canvas.getContext("2d")!;
     const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    const [r, gr, b] = dark ? [38, 41, 47] : [255, 255, 255];
+    const [r, gr, b] = dark ? [30, 39, 54] : [255, 255, 253];
     g.addColorStop(0, `rgba(${r},${gr},${b},${dark ? 0.7 : 0.8})`);
     g.addColorStop(0.45, `rgba(${r},${gr},${b},${dark ? 0.3 : 0.35})`);
     g.addColorStop(1, `rgba(${r},${gr},${b},0)`);
@@ -34,7 +34,7 @@ function useSpotTexture(dark: boolean) {
 /** Studio built entirely from local light-formers: no HDRI download. */
 export function Studio({ dark, quality, built }: { dark: boolean; quality: Quality; built: BuiltCar | null }) {
   const bg = dark ? STUDIO_BG.dark : STUDIO_BG.light;
-  const envBg = dark ? "#07080a" : "#c9ced6";
+  const envBg = dark ? "#07080a" : "#cfccc5";
   const spot = useSpotTexture(dark);
   const floor = useRef<THREE.Group>(null);
   const tracked = useRef<{ car: THREE.Object3D; built: BuiltCar; parts: { node: THREE.Object3D; part: BuiltPart }[] } | null>(null);
@@ -115,7 +115,7 @@ export function Studio({ dark, quality, built }: { dark: boolean; quality: Quali
             maxDepthThreshold={1.2}
             roughness={0.85}
             metalness={0.2}
-            color={dark ? "#0d0f13" : "#e4e7eb"}
+            color={dark ? "#0b0f15" : "#e6e3dc"}
           />
         </mesh>
       ) : (
@@ -123,7 +123,7 @@ export function Studio({ dark, quality, built }: { dark: boolean; quality: Quali
           {/* Shadow catcher: the floor takes the background color, so only shadows and the light pool show. */}
           <mesh rotation-x={-Math.PI / 2} position={[0, 0, 0]} receiveShadow>
             <planeGeometry args={[80, 80]} />
-            <shadowMaterial transparent opacity={dark ? 0.45 : 0.2} color={dark ? "#000000" : "#1e293b"} />
+            <shadowMaterial transparent opacity={dark ? 0.45 : 0.2} color={dark ? "#000000" : "#2b2520"} />
           </mesh>
           <mesh rotation-x={-Math.PI / 2} position={[0, 0.002, 0]} renderOrder={-1}>
             <circleGeometry args={[8.5, 64]} />
@@ -136,10 +136,10 @@ export function Studio({ dark, quality, built }: { dark: boolean; quality: Quali
         args={[30, 30]}
         cellSize={0.25}
         cellThickness={0.5}
-        cellColor={dark ? "#1a1d23" : "#dde1e7"}
+        cellColor={dark ? "#121b28" : "#dcd8cf"}
         sectionSize={1}
         sectionThickness={0.9}
-        sectionColor={dark ? "#252a33" : "#cbd1d9"}
+        sectionColor={dark ? "#1d2b3e" : "#cac5ba"}
         fadeDistance={15}
         fadeStrength={1.8}
         infiniteGrid

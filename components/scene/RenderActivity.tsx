@@ -1,6 +1,7 @@
 "use client";
 import { addTail, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
+import { usePerf } from "@/lib/store/perf";
 import { useScene, type Quality } from "@/lib/store/scene";
 
 /** Wake for store changes; imperative animations request their next frame. */
@@ -27,6 +28,7 @@ export function RenderActivity({ quality, onDpr }: { quality: Quality; onDpr: (d
     sample.current.start = 0;
     sample.current.frames = 0;
     sample.current.averages = [];
+    usePerf.setState({ fps: 0 });
   }), []);
 
   useFrame(() => {
@@ -37,6 +39,7 @@ export function RenderActivity({ quality, onDpr }: { quality: Quality; onDpr: (d
     if (now - s.start < 250) return;
     const fps = Math.round((s.frames * 1000) / (now - s.start));
     s.refreshRate = Math.max(s.refreshRate, fps);
+    usePerf.setState({ fps });
     s.averages.push(fps);
     s.frames = 0;
     if (s.averages.length < 10) return;

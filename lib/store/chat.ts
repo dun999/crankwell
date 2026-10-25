@@ -3,7 +3,8 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { getCar, getPart } from "@/lib/cars";
 import type { SystemId } from "@/lib/cars/types";
-import type { SafetyTest, UiEvent } from "@/lib/agent/events";
+import type { DiagnosisCase, SafetyTest, UiEvent } from "@/lib/agent/events";
+import type { Action } from "@/lib/commerce/types";
 import { getSessionId } from "@/lib/session";
 import { useScene } from "./scene";
 import { createSelectiveStorage } from "./storage";
@@ -11,7 +12,7 @@ import { createSelectiveStorage } from "./storage";
 export type Block =
   | { kind: "text"; text: string }
   | { kind: "progress"; text: string }
-  | { kind: "tool"; id: string; name: string; label: string; status: "running" | "done" | "error" }
+  | { kind: "tool"; id: string; name: string; label: string; status: "running" | "done" | "error"; at?: number; ms?: number }
   | { kind: "ui"; event: UiEvent; answers?: Record<string, string>; submitted?: boolean }
   | { kind: "error"; text: string };
 
@@ -19,6 +20,8 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   blocks: Block[];
+  /** Set when the message came from a diagnosis made in Claude (opened via /app?case=). */
+  caseId?: string;
 }
 
 interface ChatState {
@@ -34,6 +37,7 @@ interface ChatState {
   send: (text: string) => Promise<void>;
   setAnswer: (msgId: string, blockIdx: number, testId: string, answer: string) => void;
   submitAnswers: (msgId: string, blockIdx: number) => void;
+  openCase: (c: DiagnosisCase, actions: Action[]) => void;
   stop: () => void;
   reset: () => void;
 }
@@ -150,7 +154,9 @@ export const useChat = create<ChatState>()(
               } else if (ev === "tool") {
                 patch((b) => {
                   const idx = b.findIndex((x) => x.kind === "tool" && x.id === d.id);
-                  const block: Block = { kind: "tool", id: d.id, name: d.name, label: d.label, status: d.status };
+                  const prev = idx >= 0 ? (b[idx] as Extract<Block, { kind: "tool" }>) : undefined;
+                  const at = prev?.at ?? Date.now();
+                  const block: Block = { kind: "tool", id: d.id, name: d.name, label: d.label, status: d.status, at, ms: d.status === "running" ? undefined : Date.now() - at };
                   if (idx >= 0) return b.map((x, k) => (k === idx ? block : x));
                   return [...b, block];
                 });
@@ -194,6 +200,19 @@ export const useChat = create<ChatState>()(
           ),
         }));
         void get().send(`Here are my safety test results:\n${lines.join("\n")}`);
+      },
+
+      openCase: (c, actions) => {
+        const diagnosis: UiEvent = { type: "diagnosis", carId: c.carId, title: c.title, summary: c.summary, severity: c.severity, driveSafety: c.driveSafety, suspects: c.suspects };
+        applyUiEvent(diagnosis);
+        if (get().messages.some((m) => m.caseId === c.id)) return set({ open: true });
+        const blocks: Block[] = [
+          { kind: "text", text: `From Claude: here's the diagnosis${c.vehicle ? ` for your ${c.vehicle}` : ""}. The suspect parts are highlighted on the car.` },
+          { kind: "ui", event: diagnosis },
+        ];
+        if (c.options) blocks.push({ kind: "ui", event: { type: "recommendations", carId: c.carId, headline: c.options.headline, actions: c.options.actions } });
+        for (const action of actions.filter((a) => a.status === "pending" || a.status === "confirmed")) blocks.push({ kind: "ui", event: { type: "action", action, oneTap: false } });
+        set((s) => ({ open: true, messages: [...s.messages, { id: uid(), role: "assistant", caseId: c.id, blocks }] }));
       },
 
       stop: () => controller?.abort(),

@@ -1,7 +1,7 @@
 "use client";
 import { MousePointerClick } from "lucide-react";
 import { useEffect, useRef } from "react";
-import { getPart } from "@/lib/cars";
+import { getPart, partCode } from "@/lib/cars";
 import { SYSTEM_META } from "@/lib/cars/types";
 import { useScene } from "@/lib/store/scene";
 import { Dots, money } from "../ui";
@@ -60,23 +60,21 @@ export function HoverTag() {
       role="tooltip"
     >
       {part && meta && p && (
-        <div className="glass w-[290px] rounded-2xl p-3 text-xs" style={{ background: "color-mix(in srgb, var(--surface-solid) 95%, transparent)" }}>
-          <div className="flex items-start gap-2">
-            <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: meta.color }} />
-            <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-semibold leading-snug">{part.name}</div>
-              <div className="text-[11px] text-muted">{meta.label}</div>
-            </div>
+        <div className="glass w-[284px] rounded-xl p-3 text-xs" style={{ background: "color-mix(in srgb, var(--surface-solid) 96%, transparent)" }}>
+          <div className="fig flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: meta.color }} />
+            {partCode(carId, part.id)} · {meta.label}
           </div>
+          <div className="mt-1 text-[13px] font-semibold leading-snug">{part.name}</div>
           <p className="mt-2 line-clamp-3 leading-relaxed text-ink/85">{part.purpose}</p>
           <div className="mt-2.5 grid grid-cols-2 gap-1.5">
-            <div className="rounded-lg border border-line px-2 py-1.5">
+            <div className="rounded-md border border-line px-2 py-1.5">
               <div className="text-[10.5px] text-muted">Part cost</div>
-              <div className="font-semibold tabular-nums">{sold ? `${money(p.partMin)}–${money(p.partMax)}` : "Not sold separately"}</div>
+              <div className="mono text-[11.5px] font-semibold">{sold ? `${money(p.partMin)}–${money(p.partMax)}` : "Not sold separately"}</div>
             </div>
-            <div className="rounded-lg border border-line px-2 py-1.5">
+            <div className="rounded-md border border-line px-2 py-1.5">
               <div className="text-[10.5px] text-muted">{sold ? "Shop labor" : "Repair cost"}</div>
-              <div className="font-semibold tabular-nums">{p.laborMax > 0 ? `${money(p.laborMin)}–${money(p.laborMax)}` : "DIY · free"}</div>
+              <div className="mono text-[11.5px] font-semibold">{p.laborMax > 0 ? `${money(p.laborMin)}–${money(p.laborMax)}` : "DIY · free"}</div>
             </div>
           </div>
           {p.unit && <div className="mt-1 text-[10.5px] text-faint">{p.unit} · typical US price, estimate</div>}
