@@ -30,6 +30,8 @@ export interface TxEvent {
   source: "app" | "paypal-api" | "paypal-webhook";
   type: string;
   note?: string;
+  /** A webhook that arrived after the transaction had already moved past it. */
+  late?: boolean;
 }
 
 export interface Transaction {

@@ -186,7 +186,8 @@ export function Receipt({ action }: { action: Action }) {
             </div>
             <ol className="ml-1 space-y-2 border-l border-line pl-3.5">
               {tx.events.map((e, i) => {
-                const latest = i === tx.events.length - 1;
+                // The current state is the newest event that moved it; late webhooks only confirm.
+                const latest = i === tx.events.findLastIndex((x) => !x.late);
                 return (
                   <li key={`${e.at}-${i}`} className="rise relative text-[11.5px]">
                     <span
@@ -206,7 +207,7 @@ export function Receipt({ action }: { action: Action }) {
                       </span>
                       <span className="mono shrink-0 text-[10.5px] text-faint">{new Date(e.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</span>
                     </div>
-                    {e.note && <div className="truncate text-faint">{e.note}</div>}
+                    {e.note && <div className={clsx("truncate", e.late ? "text-faint/80" : "text-faint")}>{e.note}</div>}
                   </li>
                 );
               })}

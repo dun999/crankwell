@@ -385,7 +385,7 @@ type Resource = {
 function moveTo(tx: Transaction, status: TxStatus, type: string, extra: Partial<Transaction["paypal"]> = {}) {
   if (RANK[status] < RANK[tx.status]) {
     // Out-of-order delivery (e.g. APPROVED after COMPLETED): keep the newer state, still log it.
-    return save(tx.id, { paypal: extra }, { source: "paypal-webhook", type, note: "already further along" });
+    return save(tx.id, { paypal: extra }, { source: "paypal-webhook", type, note: "Arrived late · status unchanged", late: true });
   }
   return save(tx.id, { status, paypal: extra }, { source: "paypal-webhook", type });
 }
