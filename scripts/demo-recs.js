@@ -11,7 +11,7 @@
           { sku: "FYC-COROLLA-MASTER_CYLINDER-O", carId: "corolla", partId: "brakes.master_cylinder", template: "master_cylinder", name: "OEM-Spec Brake master cylinder", tier: "OE-Equivalent", brand: "OEM-Spec", price: 174.99, warranty: "2 years", inStock: true, shipDays: 3 },
           { sku: "FYC-COROLLA-MASTER_CYLINDER-P", carId: "corolla", partId: "brakes.master_cylinder", template: "master_cylinder", name: "Apex Pro Brake master cylinder", tier: "Performance", brand: "Apex Pro", price: 259.99, warranty: "Limited lifetime", inStock: true, shipDays: 2 } ] },
       { type: "reserve_shop", title: "Tow to a brake specialist", why: "Prefer a shop? They'll pressure-test the system on a lift.", urgency: "soon", estCost: { min: 220, max: 520 },
-        shop: { id: "shop_precision_brake", name: "Precision Brake & Alignment", specialties: ["brakes"], rating: 4.8, reviews: 412, distanceKm: 2.1, address: "100 Market St", hours: "Mon–Sat 8–6", laborRate: 135, deposit: 25, nextSlots: ["Today 3:30 PM", "Tomorrow 8:00 AM", "Tomorrow 1:00 PM"], lat: 0, lng: 0 } },
+        shop: { id: "shop_precision_brake", name: "Precision Brake & Alignment", specialties: ["brakes"], rating: 4.8, reviews: 412, distanceKm: 2.1, address: "100 Market St", hours: "Mon–Sat 8–6", laborRate: 135, deposit: 25, nextSlots: [1, 2, 3].map((d) => { const t = new Date(Date.now() + d * 86400000); t.setUTCHours(16 + d, d % 2 ? 30 : 0, 0, 0); return t.toISOString(); }), timeZone: "America/Los_Angeles", lat: 0, lng: 0 } },
     ],
   };
   const st = window.__chat.getState();

@@ -2,6 +2,7 @@ import { providerHealth } from "@/lib/agent/llm";
 import { db, lastWebhookAt } from "@/lib/server/db";
 import { json } from "@/lib/server/http";
 import { isPayPalConfigured, paypalEnv, paypalReachable } from "@/lib/server/paypal";
+import { reconcilerStatus } from "@/lib/server/reconcile";
 import { rateLimit } from "@/lib/server/ratelimit";
 import { dailyBudget, tokensToday } from "@/lib/server/telemetry";
 
@@ -34,7 +35,7 @@ export async function GET(req: Request) {
       ok,
       time: new Date().toISOString(),
       db: dbOk,
-      paypal: { env: paypalEnv(), ...paypal, webhook: Boolean(process.env.PAYPAL_WEBHOOK_ID), lastWebhookAt: dbOk ? lastWebhookAt() : null },
+      paypal: { env: paypalEnv(), ...paypal, webhook: Boolean(process.env.PAYPAL_WEBHOOK_ID), lastWebhookAt: dbOk ? lastWebhookAt() : null, reconciler: reconcilerStatus() },
       agent: { ok: agentOk, providers: agents, tokensToday: used, dailyBudget: Number.isFinite(budget) ? budget : null },
     },
     ok ? 200 : 503,

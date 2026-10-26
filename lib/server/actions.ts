@@ -12,7 +12,7 @@ import {
   quoteTechnician,
   sendTechnicianInvoice,
 } from "./commerce";
-import { db, serverSecret, txFind, txGet } from "./db";
+import { db, serverSecret, txFind, txForAction, txGet } from "./db";
 import { walletInfo, walletVaultId } from "./wallet";
 
 // Agent-prepared actions. The agent (in-app or Claude over MCP) can only propose one; the server prices it
@@ -52,10 +52,10 @@ export function quoteAction(payload: ActionPayload): Pick<Action, "kind" | "titl
       };
     }
     case "shop_deposit": {
-      const { shop } = quoteDeposit(payload);
+      const { shop, when } = quoteDeposit(payload);
       return {
         kind: "shop_deposit",
-        title: `${shop.name} · ${payload.slot}`,
+        title: `${shop.name} · ${when}`,
         summary: `${shop.address} · ★ ${shop.rating} · labor $${shop.laborRate}/h`,
         lines: [{ label: "Refundable diagnostic deposit", amount: usd(shop.deposit) }],
         amount: usd(shop.deposit),
@@ -232,7 +232,7 @@ export async function confirmAction(id: string, sessionId: string, opts: { origi
   if (a.payload.kind === "technician_invoice" && !email) throw new CommerceError("Add an email for the PayPal invoice", 400);
 
   // Compare-and-set so a double tap can't pay twice.
-  if (!write(id, { status: "confirming", error: undefined }, "pending")) throw new CommerceError("Already confirming", 409);
+  if (!write(id, { status: "confirming", confirmingSince: now(), error: undefined }, "pending")) throw new CommerceError("Already confirming", 409);
   try {
     const p = a.payload;
     let tx: Transaction;
@@ -274,14 +274,59 @@ export async function startApproval(id: string, opts: { origin: string; save: bo
   return { orderId: r.orderId, approveUrl: r.approveUrl };
 }
 
-/** After PayPal approval (popup or /pay redirect): capture or authorize, then mark the action confirmed. */
+/**
+ * Mark the action behind a settled transaction confirmed. Money moved, so this holds even if the card
+ * was cancelled or expired meanwhile (the user finished paying in a PayPal window still open).
+ */
+export function markActionSettled(tx: Transaction, via: NonNullable<Action["via"]> = "approval"): Action | undefined {
+  const actionId = typeof tx.meta?.actionId === "string" ? tx.meta.actionId : undefined;
+  if (!actionId) return undefined;
+  const current = getAction(actionId);
+  if (!current || !settled(tx) || current.status === "confirmed") return current;
+  return write(actionId, { status: "confirmed", txId: tx.id, via, confirmedAt: now(), error: undefined });
+}
+
+const g = globalThis as unknown as { __completing?: Map<string, Promise<{ action?: Action; tx: Transaction }>> };
+const completing = (g.__completing ??= new Map());
+
+/**
+ * After PayPal approval: capture or authorize, then mark the action confirmed. The popup, the /pay
+ * return, the CHECKOUT.ORDER.APPROVED webhook and the reconciler can all call this for one order; they
+ * share one run.
+ */
 export async function completeApproval(orderId: string, sessionId: string | null): Promise<{ action?: Action; tx: Transaction }> {
   const found = txFind("order_id", orderId);
   if (!found || (sessionId && found.sessionId !== sessionId)) throw new CommerceError("Order not found", 404);
-  const tx = found.kind === "shop_deposit" ? await authorizeOrder(orderId, sessionId) : await captureOrder(orderId, sessionId);
-  const actionId = typeof tx.meta?.actionId === "string" ? tx.meta.actionId : undefined;
-  if (!actionId) return { tx };
-  const current = getAction(actionId);
-  if (!settled(tx) || current?.status === "confirmed") return { action: current, tx };
-  return { action: write(actionId, { status: "confirmed", txId: tx.id, via: "approval", confirmedAt: now(), error: undefined }), tx };
+  let run = completing.get(orderId);
+  if (!run) {
+    run = (async () => {
+      const tx = found.kind === "shop_deposit" ? await authorizeOrder(orderId, null) : await captureOrder(orderId, null);
+      return { action: markActionSettled(tx), tx };
+    })().finally(() => completing.delete(orderId));
+    completing.set(orderId, run);
+  }
+  return run;
+}
+
+/** How long a confirm may run before it counts as interrupted (a crash or restart mid-payment). */
+export const STUCK_CONFIRM_MS = 2 * 60_000;
+
+/**
+ * Recover actions left "confirming" by an interrupted payment: confirmed if PayPal settled it (the
+ * reconciler checks PayPal first), otherwise open again for the user to retry.
+ */
+export function recoverStuckActions(nowMs = Date.now()): string[] {
+  const ids = (db().prepare("SELECT id FROM actions WHERE status = 'confirming'").all() as { id: string }[]).map((r) => r.id);
+  const fixed: string[] = [];
+  for (const id of ids) {
+    const a = load(id)?.action;
+    if (!a || nowMs - Date.parse(a.confirmingSince ?? a.createdAt) < STUCK_CONFIRM_MS) continue;
+    const tx = a.txId ? txGet(a.txId) : txForAction(id);
+    const next =
+      tx && settled(tx)
+        ? write(id, { status: "confirmed", txId: tx.id, via: tx.kind === "technician_invoice" ? "invoice" : "vault", confirmedAt: now(), error: undefined }, "confirming")
+        : write(id, { status: "pending", error: "The last attempt was interrupted. Check Orders before you try again." }, "confirming");
+    if (next) fixed.push(id);
+  }
+  return fixed;
 }

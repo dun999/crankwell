@@ -4,11 +4,13 @@ import { z } from "zod";
 import { formatPrice, getCar, getPart } from "@/lib/cars";
 import { CAR_SPECS } from "@/lib/cars/specs";
 import type { CarId } from "@/lib/cars/types";
-import { DEFAULT_LOCATION, findShops, findTechnicians, getShop, getTechnician } from "@/lib/catalog/providers";
+import { DEFAULT_LOCATION, findShops, findTechnicians, getShop, getTechnician, slotOpen } from "@/lib/catalog/providers";
+import { slotLabel } from "@/lib/catalog/slots";
 import { findSku, getSpareParts } from "@/lib/catalog/spare-parts";
 import type { ActionPayload, RepairShop, SparePart, Technician } from "@/lib/commerce/types";
-import { listActions, oneTapBlocker, prepareAction } from "@/lib/server/actions";
-import { CommerceError, listTransactions } from "@/lib/server/commerce";
+import { oneTapBlocker, prepareAction } from "@/lib/server/actions";
+import { CommerceError } from "@/lib/server/commerce";
+import { ordersForAgent } from "@/lib/server/reconcile";
 import type { RecommendedAction, Suspect, UiEvent, ViewContext } from "./events";
 
 export const CarIdS = z.enum(["corolla", "crv"]);
@@ -22,7 +24,7 @@ export const PrepareActionS = z.object({
   sku: z.string().optional().describe("parts: a sku from search_spare_parts"),
   quantity: z.number().int().min(1).max(8).optional().describe("parts: how many (default 1)"),
   shop_id: z.string().optional().describe("shop_deposit: a shop_id from find_repair_shops"),
-  slot: z.string().max(60).optional().describe("shop_deposit: one of that shop's next_slots, exactly (default: the earliest)"),
+  slot: z.string().max(60).optional().describe("shop_deposit: a `slot` value from that shop's next_slots, copied exactly (default: the earliest)"),
   technician_id: z.string().optional().describe("technician: a technician_id from find_technicians"),
   when: z.string().max(60).optional().describe("technician: when they should come, e.g. 'Today, as soon as possible'"),
   hours: z.number().min(1).max(6).optional().describe("technician: labor estimate in hours (default 1)"),
@@ -130,7 +132,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
     "Show the user's options as cards with built-in PayPal checkout (parts), PayPal invoice (technician) or PayPal deposit authorization (shop). Use exact IDs from the lookup tools.",
   prepare_action:
     "Prepare a purchase the user asked for: buy a part, reserve a repair shop (refundable deposit hold) or book a mobile technician (PayPal invoice). The server prices it and shows a confirm card. Nothing is charged until the user taps Confirm (one tap with saved PayPal, otherwise PayPal approval). Call it only when the user asks you to buy, book or reserve, or accepts your suggestion. Use exact ids from the lookup tools.",
-  get_orders: "Get the user's PayPal orders, shop reservations and technician invoices with their current status, plus anything still waiting for their confirmation.",
+  get_orders: "Get the user's PayPal orders, shop reservations and technician invoices, with open ones checked live against PayPal (paypal_check), plus anything still waiting for their confirmation.",
 };
 
 /** What the user sees while a tool runs. */
@@ -205,7 +207,17 @@ export function partBrief(carId: CarId, partId: string) {
 }
 
 export const skuBrief = (s: SparePart) => ({ sku: s.sku, tier: s.tier, brand: s.brand, price_usd: s.price, warranty: s.warranty, in_stock: s.inStock, ships_in_days: s.shipDays });
-export const shopBrief = (s: RepairShop) => ({ shop_id: s.id, name: s.name, specialties: s.specialties, rating: s.rating, distance_km: s.distanceKm, labor_rate_usd_hr: s.laborRate, deposit_usd: s.deposit, next_slots: s.nextSlots });
+export const shopBrief = (s: RepairShop) => ({
+  shop_id: s.id,
+  name: s.name,
+  specialties: s.specialties,
+  rating: s.rating,
+  distance_km: s.distanceKm,
+  labor_rate_usd_hr: s.laborRate,
+  deposit_usd: s.deposit,
+  // `slot` is what prepare_action takes; `label` is how to say it (the shop's local time).
+  next_slots: s.nextSlots.map((slot) => ({ slot, label: slotLabel(slot, s.timeZone) })),
+});
 export const technicianBrief = (t: Technician) => ({ technician_id: t.id, name: t.name, skills: t.skills, certified: t.certified, rating: t.rating, callout_fee_usd: t.calloutFee, hourly_rate_usd: t.hourlyRate, eta_minutes: t.etaMinutes });
 
 /** Validate recommended options against the catalog and attach the SKUs, technician or shop they refer to. */
@@ -254,7 +266,9 @@ export function actionPayload(a: z.infer<typeof PrepareActionS>, location?: { la
     const shop = a.shop_id ? getShop(a.shop_id, location?.lat, location?.lng) : undefined;
     if (!shop) throw new ToolInputError("shop_deposit needs a shop_id from find_repair_shops.");
     const slot = a.slot ?? shop.nextSlots[0];
-    if (!shop.nextSlots.includes(slot)) throw new ToolInputError(`slot must be one of: ${shop.nextSlots.join(" | ")}`);
+    if (!slot || !slotOpen(shop.id, slot, location?.lat, location?.lng)) {
+      throw new ToolInputError(`slot must be a \`slot\` value from next_slots: ${shop.nextSlots.map((s) => `${s} (${slotLabel(s, shop.timeZone)})`).join(" | ")}`);
+    }
     return { kind: "shop_deposit", carId: a.car_id, partId: a.part_id, shopId: shop.id, slot, issue: a.issue, location: location ?? null };
   }
   const tech = a.technician_id ? getTechnician(a.technician_id) : undefined;
@@ -358,19 +372,7 @@ async function exec(name: ToolName, input: unknown, ctx: ToolContext): Promise<u
     }
     case "get_orders": {
       schemas.get_orders.parse(input ?? {});
-      const tx = listTransactions(ctx.sessionId);
-      const waiting = listActions(ctx.sessionId).filter((x) => x.status === "pending");
-      return {
-        waiting_for_confirmation: waiting.map((x) => ({ title: x.title, amount_usd: x.amount, expires: x.expiresAt })),
-        orders: tx.slice(0, 10).map((t) => ({
-          kind: t.kind,
-          title: t.title,
-          status: t.status,
-          amount_usd: t.amount,
-          created: t.createdAt,
-          last_event: t.events[t.events.length - 1]?.type,
-        })),
-      };
+      return ordersForAgent(ctx.sessionId);
     }
   }
 }

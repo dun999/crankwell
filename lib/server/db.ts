@@ -189,6 +189,24 @@ export function txList(sessionId: string): Transaction[] {
   );
 }
 
+/** Transactions in these statuses not touched since `updatedBefore`, oldest first (for the reconciler). */
+export function txStale(statuses: Transaction["status"][], updatedBefore: string, createdAfter: string, limit = 25): Transaction[] {
+  const marks = statuses.map(() => "?").join(", ");
+  return (
+    db()
+      .prepare(`SELECT data FROM transactions WHERE status IN (${marks}) AND updated_at < ? AND created_at > ? ORDER BY updated_at ASC LIMIT ?`)
+      .all(...statuses, updatedBefore, createdAfter, limit) as { data: string }[]
+  ).map((r) => JSON.parse(r.data) as Transaction);
+}
+
+/** The latest transaction an action started, if any. */
+export function txForAction(actionId: string): Transaction | undefined {
+  const r = db().prepare("SELECT data FROM transactions WHERE json_extract(data, '$.meta.actionId') = ? ORDER BY created_at DESC LIMIT 1").get(actionId) as
+    | { data: string }
+    | undefined;
+  return r ? (JSON.parse(r.data) as Transaction) : undefined;
+}
+
 /** Apply a patch and append a timeline event atomically. */
 export function txUpdate(
   id: string,

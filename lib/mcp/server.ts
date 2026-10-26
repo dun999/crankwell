@@ -25,10 +25,11 @@ import { DEFAULT_LOCATION, findShops, findTechnicians } from "@/lib/catalog/prov
 import { getSpareParts } from "@/lib/catalog/spare-parts";
 import { findSuspectParts, referenceCar } from "@/lib/catalog/symptom-search";
 import type { Action } from "@/lib/commerce/types";
-import { actionStatus, confirmAction, confirmKey, confirmKeyValid, invoiceRecipient, listActions, oneTapBlocker, prepareAction } from "@/lib/server/actions";
+import { actionStatus, confirmAction, confirmKey, confirmKeyValid, invoiceRecipient, oneTapBlocker, prepareAction } from "@/lib/server/actions";
 import { claimCase, createCase, getCase, updateCase } from "@/lib/server/cases";
-import { CommerceError, listTransactions } from "@/lib/server/commerce";
+import { CommerceError } from "@/lib/server/commerce";
 import { paypalErrorMessage } from "@/lib/server/paypal";
+import { ordersForAgent } from "@/lib/server/reconcile";
 import { cardHtml } from "./card";
 import { mcpRequest } from "./context";
 
@@ -356,22 +357,13 @@ export function registerCrankwell(server: McpServer) {
     "get_orders",
     {
       title: "Get orders",
-      description: "The user's Crankwell orders (parts, shop deposits, technician invoices) with live PayPal status, plus checkouts still waiting for them.",
+      description:
+        "The user's Crankwell orders (parts, shop deposits, technician invoices). Open ones are checked live against PayPal first (paypal_check: live, final or unavailable). Also lists checkouts still waiting for them.",
       inputSchema: z.object({}),
       annotations: { title: "Get orders", ...lookup },
     },
     () =>
-      guard(() => {
-        const sessionId = session();
-        return data({
-          waiting_for_confirmation: listActions(sessionId)
-            .filter((x) => x.status === "pending")
-            .map((x) => ({ action_id: x.id, title: x.title, amount_usd: x.amount, expires: x.expiresAt })),
-          orders: listTransactions(sessionId)
-            .slice(0, 10)
-            .map((t) => ({ kind: t.kind, title: t.title, status: t.status, amount_usd: t.amount, created: t.createdAt, last_event: t.events[t.events.length - 1]?.type })),
-        });
-      }),
+      guard(async () => data(await ordersForAgent(session(), { actionIds: true }))),
   );
 
   // The card's Pay button. Hidden from the model (visibility: app) and gated by a key only the card gets.

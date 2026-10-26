@@ -9,6 +9,7 @@ const STATUS: Record<TxStatus, { label: string; tone: "ok" | "warn" | "muted" | 
   CAPTURED: { label: "Deposit captured", tone: "ok" },
   VOIDED: { label: "Released", tone: "muted" },
   REFUNDED: { label: "Refunded", tone: "warn" },
+  REVERSED: { label: "Reversed", tone: "danger" },
   DENIED: { label: "Denied", tone: "danger" },
   FAILED: { label: "Failed", tone: "danger" },
   DRAFT: { label: "Draft", tone: "muted" },

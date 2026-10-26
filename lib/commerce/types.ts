@@ -10,6 +10,8 @@ export type TxStatus =
   | "CAPTURED"
   | "VOIDED"
   | "REFUNDED"
+  /** PayPal pulled the money back (chargeback or dispute lost). */
+  | "REVERSED"
   | "DENIED"
   | "FAILED"
   | "DRAFT"
@@ -32,6 +34,17 @@ export interface TxEvent {
   note?: string;
   /** A webhook that arrived after the transaction had already moved past it. */
   late?: boolean;
+}
+
+/** A buyer dispute on this payment, from CUSTOMER.DISPUTE.* webhooks. */
+export interface TxDispute {
+  id: string;
+  reason?: string;
+  status?: string;
+  stage?: string;
+  outcome?: string;
+  amount?: string;
+  updatedAt: string;
 }
 
 export interface Transaction {
@@ -57,6 +70,7 @@ export interface Transaction {
     payerEmail?: string;
   };
   meta?: Record<string, unknown>;
+  dispute?: TxDispute;
   events: TxEvent[];
   createdAt: string;
   updatedAt: string;
@@ -87,7 +101,10 @@ export interface RepairShop {
   hours: string;
   laborRate: number;
   deposit: number;
+  /** Open appointment times as ISO instants, earliest first. */
   nextSlots: string[];
+  /** The shop's clock, for showing slot times (IANA zone). */
+  timeZone: string;
   lat: number;
   lng: number;
 }
@@ -139,6 +156,8 @@ export interface Action {
   error?: string;
   createdAt: string;
   expiresAt: string;
+  /** When the current confirm attempt started, so an interrupted one can be recovered. */
+  confirmingSince?: string;
   confirmedAt?: string;
 }
 

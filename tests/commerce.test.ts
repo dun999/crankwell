@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getSpareParts } from "@/lib/catalog/spare-parts";
+import { getShop } from "@/lib/catalog/providers";
+
+/** The next open slot at the brake shop (slots are real times, so tests pick one at run time). */
+const SLOT = getShop("shop_precision_brake")!.nextSlots[0];
 
 // PayPal is mocked: these tests cover our order logic, pricing and webhook state machine.
 const pp = vi.hoisted(() => ({
@@ -62,7 +66,7 @@ describe("parts orders (Orders v2 CAPTURE)", () => {
 
 describe("shop deposit (AUTHORIZE → capture / void)", () => {
   it("authorizes, then captures at check-in", async () => {
-    const { orderId } = await commerce.createDepositOrder({ sessionId: S, shopId: "shop_precision_brake", slot: "Today 3:30 PM", carId: "corolla", origin: "" });
+    const { orderId } = await commerce.createDepositOrder({ sessionId: S, shopId: "shop_precision_brake", slot: SLOT, carId: "corolla", origin: "" });
     const auth = await commerce.authorizeOrder(orderId, S);
     expect(auth.status).toBe("AUTHORIZED");
     const cap = await commerce.captureDeposit(auth.id, S);
@@ -70,7 +74,7 @@ describe("shop deposit (AUTHORIZE → capture / void)", () => {
     await expect(commerce.voidDeposit(auth.id, S)).rejects.toThrow(/No active authorization/);
   });
   it("rejects slots the shop doesn't offer", async () => {
-    await expect(commerce.createDepositOrder({ sessionId: S, shopId: "shop_precision_brake", slot: "Sun 3 AM", carId: "corolla", origin: "" })).rejects.toThrow(/slot/);
+    await expect(commerce.createDepositOrder({ sessionId: S, shopId: "shop_precision_brake", slot: "2020-01-05T03:00:00.000Z", carId: "corolla", origin: "" })).rejects.toThrow(/slot/);
   });
 });
 

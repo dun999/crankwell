@@ -1,4 +1,5 @@
 import type { RepairShop, Technician } from "@/lib/commerce/types";
+import { openSlots } from "./slots";
 
 // Seeded demo data. Shops are placed deterministically around the user's
 // location so distances look real; nothing here is a real business.
@@ -16,9 +17,26 @@ const SHOP_SEEDS = [
   { id: "shop_collision_works", name: "Collision Works Body Shop", specialties: ["body"], rating: 4.6, reviews: 540, km: 3.9, bearing: 340, street: "Lawrence Expy", laborRate: 125, deposit: 50 },
 ];
 
-const SLOTS = ["Today 3:30 PM", "Tomorrow 8:00 AM", "Tomorrow 1:00 PM", "Thu 9:30 AM", "Fri 11:00 AM"];
+/** Slots are offered at least this far ahead, and still bookable until this close to the time. */
+const LISTING_LEAD_MIN = 60;
+const BOOKING_LEAD_MIN = 15;
+const MON_SAT = [1, 2, 3, 4, 5, 6];
+const MON_FRI = [1, 2, 3, 4, 5];
+
+/**
+ * The clock shops near (lat, lng) keep: the demo city's real zone (with DST) around the Bay Area, else
+ * a whole-hour zone from the longitude, which is close enough for seeded demo shops.
+ */
+export function zoneFor(lat = DEFAULT_LOCATION.lat, lng = DEFAULT_LOCATION.lng): string {
+  if (lat > 32 && lat < 42.5 && lng > -125 && lng < -114) return "America/Los_Angeles";
+  const h = Math.max(-12, Math.min(14, Math.round(lng / 15)));
+  return h === 0 ? "Etc/GMT" : `Etc/GMT${h > 0 ? "-" : "+"}${Math.abs(h)}`;
+}
+
+const slotsFor = (i: number, tz: string, leadMin: number) => openSlots({ tz, openDays: i % 3 === 2 ? MON_FRI : MON_SAT, seed: i, leadMin });
 
 export function shopsNear(lat = DEFAULT_LOCATION.lat, lng = DEFAULT_LOCATION.lng): RepairShop[] {
+  const tz = zoneFor(lat, lng);
   return SHOP_SEEDS.map((s, i) => {
     const rad = (s.bearing * Math.PI) / 180;
     const dLat = (s.km / 111) * Math.cos(rad);
@@ -34,7 +52,8 @@ export function shopsNear(lat = DEFAULT_LOCATION.lat, lng = DEFAULT_LOCATION.lng
       hours: i % 3 === 2 ? "Mon–Fri 7:30–6" : "Mon–Sat 8–6",
       laborRate: s.laborRate,
       deposit: s.deposit,
-      nextSlots: SLOTS.slice(i % 2, (i % 2) + 3),
+      nextSlots: slotsFor(i, tz, LISTING_LEAD_MIN).slice(0, 3),
+      timeZone: tz,
       lat: lat + dLat,
       lng: lng + dLng,
     };
@@ -65,6 +84,12 @@ export function findTechnicians(skill?: string): Technician[] {
 
 export function getShop(id: string, lat?: number, lng?: number) {
   return shopsNear(lat, lng).find((s) => s.id === id);
+}
+
+/** Can this slot still be booked? Any of the shop's open times counts, not only the three it lists. */
+export function slotOpen(shopId: string, slot: string, lat?: number, lng?: number) {
+  const i = SHOP_SEEDS.findIndex((s) => s.id === shopId);
+  return i >= 0 && slotsFor(i, zoneFor(lat, lng), BOOKING_LEAD_MIN).includes(slot);
 }
 export function getTechnician(id: string) {
   return TECHNICIANS.find((t) => t.id === id);

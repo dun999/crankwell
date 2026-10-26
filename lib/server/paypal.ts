@@ -222,6 +222,17 @@ function walletSource(input: { needsShipping: boolean; returnUrl: string; cancel
   };
 }
 
+export type OrderOutcome = ReturnType<typeof orderOutcome>;
+
+/** Read an order as PayPal has it now (the source of truth when our copy may be stale). */
+export async function getOrder(orderId: string) {
+  const { result } = await sdk().orders.getOrder({ id: orderId });
+  return orderOutcome(result);
+}
+
+/** Was this a 404 from PayPal (order expired or never existed)? */
+export const isNotFound = (e: unknown) => (e instanceof ApiError && e.statusCode === 404) || (e instanceof RestError && e.status === 404);
+
 export async function captureOrder(orderId: string, requestId: string) {
   const { result } = await sdk().orders.captureOrder({ id: orderId, prefer: "return=representation", paypalRequestId: requestId });
   return orderOutcome(result);
@@ -244,6 +255,15 @@ export async function deletePaymentToken(id: string) {
 }
 
 // ───────────────────────── Payments v2 ─────────────────────────
+
+/**
+ * Renew a hold whose 3-day honor period has passed (Payments v2 reauthorize). Returns the new
+ * authorization, which is the one to capture from now on.
+ */
+export async function reauthorize(authorizationId: string, requestId: string) {
+  const { result } = await sdk().payments.reauthorizePayment({ authorizationId, prefer: "return=representation", paypalRequestId: requestId });
+  return { authorizationId: result.id!, status: result.status, expires: result.expirationTime };
+}
 
 export async function captureAuthorization(authorizationId: string, requestId: string) {
   const { result } = await sdk().payments.captureAuthorizedPayment({

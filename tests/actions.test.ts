@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getShop } from "@/lib/catalog/providers";
+
+/** The next open slot at the brake shop (slots are real times, so tests pick one at run time). */
+const SLOT = getShop("shop_precision_brake")!.nextSlots[0];
 
 // PayPal is mocked: these tests cover agent-prepared actions, one-tap guardrails and Vault wiring.
 const pp = vi.hoisted(() => {
@@ -50,7 +54,7 @@ describe("prepare", () => {
 
   it("explains holds and invoices", () => {
     const s = newSession();
-    expect(actions.prepareAction(s, { kind: "shop_deposit", carId: "corolla", shopId: "shop_precision_brake", slot: "Today 3:30 PM" }, { source: "app" }).policy).toMatch(/Held, not charged/);
+    expect(actions.prepareAction(s, { kind: "shop_deposit", carId: "corolla", shopId: "shop_precision_brake", slot: SLOT }, { source: "app" }).policy).toMatch(/Held, not charged/);
     const t = actions.prepareAction(s, { kind: "technician_invoice", carId: "corolla", technicianId: "tech_maria", when: "ASAP", hours: 2 }, { source: "app" });
     expect(t.amount).toBe((59 + 2 * 95).toFixed(2));
     expect(t.policy).toMatch(/invoice/);
@@ -58,7 +62,7 @@ describe("prepare", () => {
 
   it("rejects ids that aren't in the catalog", () => {
     expect(() => actions.prepareAction(newSession(), { ...pads, items: [{ sku: "FYC-NOPE", quantity: 1 }] }, { source: "app" })).toThrow(/Unknown part SKU/);
-    expect(() => actions.prepareAction(newSession(), { kind: "shop_deposit", carId: "corolla", shopId: "shop_precision_brake", slot: "Sun 3 AM" }, { source: "app" })).toThrow(/slot/);
+    expect(() => actions.prepareAction(newSession(), { kind: "shop_deposit", carId: "corolla", shopId: "shop_precision_brake", slot: "2020-01-05T03:00:00.000Z" }, { source: "app" })).toThrow(/slot/);
   });
 });
 
@@ -105,7 +109,7 @@ describe("confirm", () => {
   it("holds a shop deposit with one tap", async () => {
     const s = newSession();
     wallet.saveWallet(s, { id: "VAULT-3", status: "VAULTED" });
-    const a = actions.prepareAction(s, { kind: "shop_deposit", carId: "corolla", shopId: "shop_precision_brake", slot: "Today 3:30 PM" }, { source: "claude" });
+    const a = actions.prepareAction(s, { kind: "shop_deposit", carId: "corolla", shopId: "shop_precision_brake", slot: SLOT }, { source: "claude" });
     const r = await actions.confirmAction(a.id, s, { origin });
     expect(r.tx?.status).toBe("AUTHORIZED");
     expect(r.tx?.paypal.authorizationId).toMatch(/^AUTH/);

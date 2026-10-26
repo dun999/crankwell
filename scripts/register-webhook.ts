@@ -11,7 +11,9 @@ const EVENTS = [
   "PAYMENT.CAPTURE.COMPLETED",
   "PAYMENT.CAPTURE.PENDING",
   "PAYMENT.CAPTURE.DENIED",
+  "PAYMENT.CAPTURE.DECLINED",
   "PAYMENT.CAPTURE.REFUNDED",
+  "PAYMENT.CAPTURE.REVERSED",
   "PAYMENT.AUTHORIZATION.CREATED",
   "PAYMENT.AUTHORIZATION.VOIDED",
   "INVOICING.INVOICE.PAID",
@@ -19,6 +21,9 @@ const EVENTS = [
   "INVOICING.INVOICE.UPDATED",
   "VAULT.PAYMENT-TOKEN.CREATED",
   "VAULT.PAYMENT-TOKEN.DELETED",
+  "CUSTOMER.DISPUTE.CREATED",
+  "CUSTOMER.DISPUTE.UPDATED",
+  "CUSTOMER.DISPUTE.RESOLVED",
 ];
 
 if (fs.existsSync(".env.local")) process.loadEnvFile(".env.local");
@@ -45,6 +50,18 @@ async function main() {
   let hook = (list.webhooks ?? []).find((w: { url: string }) => w.url === url);
   if (hook) {
     console.log(`Webhook already registered for ${url}`);
+    // Add event types this version handles that the existing hook doesn't send yet.
+    const have = new Set<string>((hook.event_types ?? []).map((e: { name: string }) => e.name));
+    const missing = EVENTS.filter((e) => !have.has(e));
+    if (!have.has("*") && missing.length) {
+      const res = await fetch(`${api}/v1/notifications/webhooks/${hook.id}`, {
+        method: "PATCH",
+        headers: auth,
+        body: JSON.stringify([{ op: "replace", path: "/event_types", value: [...have, ...missing].map((name) => ({ name })) }]),
+      });
+      if (!res.ok) throw new Error(`Update failed: ${await res.text()}`);
+      console.log(`Subscribed to ${missing.join(", ")}`);
+    }
   } else {
     const res = await fetch(`${api}/v1/notifications/webhooks`, {
       method: "POST",

@@ -25,6 +25,7 @@ const STATUS_TEXT: Record<string, string> = {
   CAPTURED: "Deposit captured",
   VOIDED: "Authorization voided",
   REFUNDED: "Refund issued",
+  REVERSED: "Payment reversed",
   SENT: "Invoice sent",
   PAID: "Invoice paid",
   CANCELLED: "Cancelled",
@@ -52,10 +53,9 @@ export const useOrders = create<OrdersState>((set, get) => ({
       const prev = s.items.find((x) => x.id === t.id);
       const items = prev ? s.items.map((x) => (x.id === t.id ? t : x)) : [t, ...s.items];
       const changed = !prev || prev.status !== t.status;
-      return {
-        items,
-        flash: announce && changed && STATUS_TEXT[t.status] ? { id: t.id, text: `${STATUS_TEXT[t.status]} · ${t.title}`, nonce: Date.now() } : s.flash,
-      };
+      const disputed = t.dispute && t.dispute.status !== prev?.dispute?.status;
+      const text = changed && STATUS_TEXT[t.status] ? STATUS_TEXT[t.status] : disputed ? (t.dispute!.outcome ? "Dispute resolved" : "Buyer dispute update") : null;
+      return { items, flash: announce && text ? { id: t.id, text: `${text} · ${t.title}`, nonce: Date.now() } : s.flash };
     }),
   refresh: async () => {
     await sessionReady();

@@ -1,6 +1,6 @@
 "use client";
 import clsx from "clsx";
-import { ExternalLink, Link2, Receipt, RefreshCw, Webhook, X, Zap } from "lucide-react";
+import { ExternalLink, Link2, Receipt, RefreshCw, ShieldAlert, Webhook, X, Zap } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { commerce } from "@/lib/commerce/client";
@@ -13,6 +13,24 @@ const OrdersLedger = dynamic(() => import("./OrdersLedger"), {
   ssr: false,
   loading: () => <p role="status" className="p-4 text-sm text-muted">Loading ledger…</p>,
 });
+
+const words = (s?: string) => (s ? s.toLowerCase().replace(/_/g, " ") : "");
+
+/** A buyer dispute, as PayPal's CUSTOMER.DISPUTE webhooks describe it. */
+function DisputeNote({ d }: { d: NonNullable<Transaction["dispute"]> }) {
+  const open = !d.outcome;
+  return (
+    <div role="status" className={clsx("flex gap-2 rounded-xl border px-3 py-2 text-xs", open ? "border-warn/40 bg-warn/10" : "border-line bg-surface-2")}>
+      <ShieldAlert size={14} className={clsx("mt-0.5 shrink-0", open ? "text-warn" : "text-muted")} />
+      <div className="min-w-0">
+        <div className="font-semibold">{open ? "Buyer dispute open" : `Dispute resolved · ${words(d.outcome)}`}</div>
+        <div className="text-muted">
+          {[words(d.reason), d.amount && money(Number(d.amount)), words(d.stage), open && words(d.status)].filter(Boolean).join(" · ")}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function TxDetail({ tx }: { tx: Transaction }) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -34,6 +52,7 @@ function TxDetail({ tx }: { tx: Transaction }) {
     ["Capture", tx.paypal.captureId],
     ["Authorization", tx.paypal.authorizationId],
     ["Refund", tx.paypal.refundId],
+    ["Dispute", tx.dispute?.id],
     ["Invoice", tx.paypal.invoiceId && `${tx.paypal.invoiceNumber} · ${tx.paypal.invoiceId}`],
   ].filter((r): r is [string, string] => Boolean(r[1]));
   return (
@@ -52,6 +71,7 @@ function TxDetail({ tx }: { tx: Transaction }) {
         <StatusPill key={tx.status} status={tx.status} press />
       </div>
       {tx.detail && <p className="text-xs leading-relaxed text-muted">{tx.detail}</p>}
+      {tx.dispute && <DisputeNote d={tx.dispute} />}
 
       <div className="flex flex-wrap gap-1.5">
         {tx.kind === "parts" && tx.status === "COMPLETED" && (
@@ -139,7 +159,7 @@ function totals(items: Transaction[]) {
     { label: "Paid", ...sum((t) => t.status === "COMPLETED" || t.status === "CAPTURED" || t.status === "PAID"), tone: "var(--ok)" },
     { label: "On hold", ...sum((t) => t.status === "AUTHORIZED"), tone: "var(--accent)" },
     { label: "Awaiting payment", ...sum((t) => ["CREATED", "APPROVED", "SENT", "UNPAID"].includes(t.status)), tone: "var(--warn)" },
-    { label: "Refunded", ...sum((t) => t.status === "REFUNDED"), tone: "var(--muted)" },
+    { label: "Refunded", ...sum((t) => t.status === "REFUNDED" || t.status === "REVERSED"), tone: "var(--muted)" },
   ];
 }
 

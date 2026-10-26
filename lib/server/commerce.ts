@@ -2,8 +2,9 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { getPart, isCarId } from "@/lib/cars";
 import { FREE_SHIPPING_OVER, SHIPPING_FLAT, findSku } from "@/lib/catalog/spare-parts";
-import { getShop, getTechnician } from "@/lib/catalog/providers";
-import type { Transaction, TxEvent, TxStatus } from "@/lib/commerce/types";
+import { getShop, getTechnician, slotOpen } from "@/lib/catalog/providers";
+import { slotDate } from "@/lib/catalog/slots";
+import type { Transaction, TxDispute, TxEvent, TxStatus } from "@/lib/commerce/types";
 import { publishTx } from "./bus";
 import { txFind, txGet, txInsert, txList, txUpdate } from "./db";
 import * as pp from "./paypal";
@@ -40,8 +41,11 @@ function save(id: string, patch: Parameters<typeof txUpdate>[1], event?: Omit<Tx
 
 const RANK: Record<TxStatus, number> = {
   CREATED: 0, DRAFT: 0, APPROVED: 1, SENT: 1, UNPAID: 1, AUTHORIZED: 2,
-  COMPLETED: 3, CAPTURED: 3, PAID: 3, VOIDED: 4, REFUNDED: 4, CANCELLED: 4, DENIED: 4, FAILED: 4,
+  COMPLETED: 3, CAPTURED: 3, PAID: 3, VOIDED: 4, REFUNDED: 4, REVERSED: 4, CANCELLED: 4, DENIED: 4, FAILED: 4,
 };
+
+/** Still waiting on the buyer at PayPal: nothing captured, held or invoiced yet. */
+export const awaitingBuyer = (tx: Transaction) => tx.status === "CREATED" || tx.status === "APPROVED";
 
 // ───────────────────────── Quotes (server catalog prices only) ─────────────────────────
 
@@ -73,8 +77,8 @@ export function quoteDeposit(input: { carId: string; shopId: string; slot: strin
   if (!isCarId(input.carId)) throw new CommerceError("Unknown car");
   const shop = getShop(input.shopId, input.location?.lat, input.location?.lng);
   if (!shop) throw new CommerceError("Unknown repair shop");
-  if (!shop.nextSlots.includes(input.slot)) throw new CommerceError("That time slot isn't available");
-  return { shop };
+  if (!slotOpen(shop.id, input.slot, input.location?.lat, input.location?.lng)) throw new CommerceError("That time slot isn't available. Pick another time.");
+  return { shop, when: slotDate(input.slot, shop.timeZone) };
 }
 
 export function quoteTechnician(input: { carId: string; technicianId: string; hours?: number }) {
@@ -146,7 +150,11 @@ export async function createPartsOrder(input: { sessionId: string; items: { sku:
   }
 }
 
-function settleCapture(tx: Transaction, r: ReturnType<typeof pp.orderOutcome>, label = "Payment captured") {
+function settleCapture(tx: Transaction, r: pp.OrderOutcome, label = "Payment captured") {
+  // The popup, the webhook and the reconciler can all finish the same order; PayPal's request id makes
+  // the capture itself idempotent, and this keeps the timeline to one entry.
+  const cur = txGet(tx.id) ?? tx;
+  if (cur.status === "COMPLETED" && cur.paypal.captureId && cur.paypal.captureId === r.captureId) return cur;
   const ok = r.captureStatus === "COMPLETED" || r.captureStatus === "PENDING";
   if (r.vault?.status === "VAULTED") saveWallet(tx.sessionId, r.vault, r.payer);
   return save(
@@ -184,21 +192,21 @@ export async function createDepositOrder(
   } & CheckoutOptions,
 ) {
   if (!pp.isPayPalConfigured()) throw new pp.PayPalNotConfigured();
-  const { shop } = quoteDeposit(input);
+  const { shop, when } = quoteDeposit(input);
   const id = `tx_${randomUUID()}`;
   const tx = txInsert({
     id,
     sessionId: input.sessionId,
     kind: "shop_deposit",
     status: "CREATED",
-    title: `${shop.name} · ${input.slot}`,
+    title: `${shop.name} · ${when}`,
     detail: `Refundable diagnostic deposit${input.issue ? ` · ${input.issue}` : ""}`,
     amount: shop.deposit.toFixed(2),
     currency: "USD",
     carId: input.carId,
     partId: input.partId,
     paypal: {},
-    meta: { shopId: shop.id, slot: input.slot, address: shop.address, ...(input.actionId ? { actionId: input.actionId } : {}) },
+    meta: { shopId: shop.id, slot: input.slot, timeZone: shop.timeZone, address: shop.address, ...(input.actionId ? { actionId: input.actionId } : {}) },
     events: [{ at: now(), source: "app", type: input.actionId ? "Reservation prepared by the mechanic" : "Reservation started" }],
     createdAt: now(),
     updatedAt: now(),
@@ -208,7 +216,7 @@ export async function createDepositOrder(
       referenceId: id,
       intent: "AUTHORIZE",
       description: `Repair reservation deposit · ${shop.name}`,
-      lines: [{ name: `Reservation deposit: ${shop.name}`, sku: `DEPOSIT-${shop.id}`.slice(0, 127), quantity: 1, unitPrice: shop.deposit, description: input.slot, physical: false }],
+      lines: [{ name: `Reservation deposit: ${shop.name}`, sku: `DEPOSIT-${shop.id}`.slice(0, 127), quantity: 1, unitPrice: shop.deposit, description: when, physical: false }],
       shipping: 0,
       needsShipping: false,
       ...returnUrls(input),
@@ -223,11 +231,17 @@ export async function createDepositOrder(
   }
 }
 
-function settleAuthorization(tx: Transaction, r: ReturnType<typeof pp.orderOutcome>, label = "Deposit authorized") {
+function settleAuthorization(tx: Transaction, r: pp.OrderOutcome, label = "Deposit authorized") {
+  const cur = txGet(tx.id) ?? tx;
+  if (cur.status === "AUTHORIZED" && cur.paypal.authorizationId && cur.paypal.authorizationId === r.authorizationId) return cur;
   if (r.vault?.status === "VAULTED") saveWallet(tx.sessionId, r.vault, r.payer);
   return save(
     tx.id,
-    { status: r.authorizationStatus === "CREATED" ? "AUTHORIZED" : "DENIED", paypal: { authorizationId: r.authorizationId, payerEmail: r.payer }, meta: { ...tx.meta, authExpires: r.expires } },
+    {
+      status: r.authorizationStatus === "CREATED" ? "AUTHORIZED" : "DENIED",
+      paypal: { authorizationId: r.authorizationId, payerEmail: r.payer },
+      meta: { ...cur.meta, authExpires: r.expires, authorizedAt: now() },
+    },
     { source: "paypal-api", type: label, note: r.expires ? `hold expires ${new Date(r.expires).toLocaleDateString()}` : undefined },
   );
 }
@@ -244,11 +258,34 @@ export async function authorizeOrder(orderId: string, sessionId: string | null) 
   }
 }
 
+/** PayPal guarantees held funds for 3 days; after that a hold is renewed before it's captured. */
+export const HONOR_PERIOD_MS = 3 * 24 * 3600_000;
+
+/** Renew an authorization past its honor period. A declined renewal still leaves the original to capture. */
+async function freshAuthorization(tx: Transaction): Promise<string> {
+  const authId = tx.paypal.authorizationId!;
+  const since = Date.parse(String(tx.meta?.authorizedAt ?? tx.createdAt));
+  if (!(Date.now() - since > HONOR_PERIOD_MS)) return authId;
+  try {
+    const r = await pp.reauthorize(authId, `${tx.id}-reauth-${authId}`);
+    save(
+      tx.id,
+      { paypal: { authorizationId: r.authorizationId }, meta: { ...tx.meta, authorizedAt: now(), authExpires: r.expires ?? tx.meta?.authExpires } },
+      { source: "paypal-api", type: "Hold renewed before capture", note: "Payments v2 reauthorize · the 3-day honor period had passed" },
+    );
+    return r.authorizationId;
+  } catch (e) {
+    save(tx.id, {}, { source: "paypal-api", type: "Hold renewal declined", note: `${pp.paypalErrorMessage(e)} · capturing the original hold` });
+    return authId;
+  }
+}
+
 export async function captureDeposit(txId: string, sessionId: string) {
   const tx = owned(txId, sessionId);
   if (tx.status !== "AUTHORIZED" || !tx.paypal.authorizationId) throw new CommerceError("No active authorization to capture");
   try {
-    const r = await pp.captureAuthorization(tx.paypal.authorizationId, `${tx.id}-capture-auth`);
+    const authId = await freshAuthorization(tx);
+    const r = await pp.captureAuthorization(authId, `${tx.id}-capture-${authId}`);
     return save(tx.id, { status: "CAPTURED", paypal: { captureId: r.captureId } }, { source: "paypal-api", type: "Deposit captured at check-in", note: `Payments v2 · ${r.status}` });
   } catch (e) {
     throw new CommerceError(pp.paypalErrorMessage(e), 502);
@@ -342,15 +379,19 @@ function invoiceStatus(s: string): TxStatus {
   return "SENT";
 }
 
-export async function refreshInvoice(txId: string, sessionId: string) {
-  const tx = owned(txId, sessionId);
+/** Bring an invoice transaction in line with PayPal. */
+export async function syncInvoice(tx: Transaction) {
   if (!tx.paypal.invoiceId) throw new CommerceError("No invoice");
   const inv = await pp.getInvoice(tx.paypal.invoiceId).catch((e) => {
     throw new CommerceError(pp.paypalErrorMessage(e), 502);
   });
   const status = invoiceStatus(inv.status);
-  if (status === tx.status) return tx;
-  return save(tx.id, { status, paypal: { payerViewUrl: inv.detail.metadata?.recipient_view_url ?? tx.paypal.payerViewUrl } }, { source: "paypal-api", type: `Invoice ${inv.status.toLowerCase()}` });
+  if (status === tx.status || RANK[status] < RANK[tx.status]) return tx;
+  return save(tx.id, { status, paypal: { payerViewUrl: inv.detail.metadata?.recipient_view_url ?? tx.paypal.payerViewUrl } }, { source: "paypal-api", type: `Invoice ${inv.status.toLowerCase().replace(/_/g, " ")}` });
+}
+
+export async function refreshInvoice(txId: string, sessionId: string) {
+  return syncInvoice(owned(txId, sessionId));
 }
 
 export async function cancelInvoice(txId: string, sessionId: string) {
@@ -368,6 +409,42 @@ export function listTransactions(sessionId: string) {
   return txList(sessionId);
 }
 
+// ───────────────────────── PayPal as the source of truth ─────────────────────────
+
+/**
+ * Apply what GET /v2/checkout/orders/{id} says to our copy: a capture or hold we never heard about
+ * (closed popup, lost webhook), a refund, a capture or void done elsewhere. APPROVED orders are left to
+ * the caller, which completes them (see completeApproval).
+ */
+export function applyOrderState(tx: Transaction, o: pp.OrderOutcome): Transaction {
+  const early = awaitingBuyer(tx);
+  if ((tx.status === "COMPLETED" || tx.status === "CAPTURED") && o.captureStatus === "REFUNDED") {
+    return save(tx.id, { status: "REFUNDED" }, { source: "paypal-api", type: "Refund confirmed with PayPal" });
+  }
+  if (tx.kind === "parts") {
+    if (early && o.captureId) return settleCapture(tx, o, "Payment confirmed with PayPal");
+    if (early && (o.captureStatus === "DECLINED" || o.captureStatus === "FAILED")) return save(tx.id, { status: "DENIED" }, { source: "paypal-api", type: "Capture declined" });
+  } else if (tx.kind === "shop_deposit") {
+    if (early && o.authorizationId) return settleAuthorization(tx, o, "Deposit confirmed with PayPal");
+    if (tx.status === "AUTHORIZED" && o.authorizationStatus === "CAPTURED") {
+      return save(tx.id, { status: "CAPTURED", paypal: { captureId: o.captureId } }, { source: "paypal-api", type: "Capture confirmed with PayPal" });
+    }
+    // The SDK's enum lacks EXPIRED, which PayPal returns for holds older than 29 days.
+    const auth = String(o.authorizationStatus ?? "");
+    if (tx.status === "AUTHORIZED" && (auth === "VOIDED" || auth === "EXPIRED")) {
+      return save(tx.id, { status: "VOIDED" }, { source: "paypal-api", type: auth === "EXPIRED" ? "Hold expired · released" : "Hold released" });
+    }
+  }
+  if (early && o.status === "VOIDED") return save(tx.id, { status: "CANCELLED" }, { source: "paypal-api", type: "PayPal voided the order" });
+  return tx;
+}
+
+/** Close out a checkout the buyer never finished. */
+export function abandonCheckout(tx: Transaction, note: string) {
+  if (!awaitingBuyer(tx)) return tx;
+  return save(tx.id, { status: "CANCELLED" }, { source: "paypal-api", type: "Checkout not completed", note });
+}
+
 // ───────────────────────── Webhooks ─────────────────────────
 
 type Resource = {
@@ -378,6 +455,13 @@ type Resource = {
   links?: { rel: string; href: string }[];
   // Vault payment tokens
   metadata?: { order_id?: string };
+  // Disputes
+  dispute_id?: string;
+  reason?: string;
+  dispute_life_cycle_stage?: string;
+  dispute_amount?: { value?: string };
+  dispute_outcome?: { outcome_code?: string };
+  disputed_transactions?: { seller_transaction_id?: string }[];
   customer?: { id?: string };
   payment_source?: { paypal?: { email_address?: string } };
 };
@@ -413,12 +497,41 @@ export function applyWebhook(event: { event_type: string; resource: Resource }):
       const tx = (related.order_id && txFind("order_id", related.order_id)) || (r.id && txFind("capture_id", r.id));
       return tx ? moveTo(tx, "DENIED", "Capture denied") : undefined;
     }
-    case "PAYMENT.CAPTURE.REFUNDED": {
-      // resource is the refund; its "up" link points at the capture
+    case "PAYMENT.CAPTURE.REFUNDED":
+    case "PAYMENT.CAPTURE.REVERSED": {
+      // The resource is the refund (or reversal); its "up" link points at the capture.
       const up = r.links?.find((l) => l.rel === "up")?.href ?? "";
       const captureId = /\/captures\/([^/]+)/.exec(up)?.[1] ?? related.capture_id ?? r.id;
       const tx = captureId ? txFind("capture_id", captureId) : undefined;
-      return tx ? moveTo(tx, "REFUNDED", "Refund completed", { refundId: r.id !== captureId ? r.id : tx.paypal.refundId }) : undefined;
+      if (!tx) return undefined;
+      const refundId = r.id !== captureId ? r.id : tx.paypal.refundId;
+      if (event.event_type === "PAYMENT.CAPTURE.REVERSED") return moveTo(tx, "REVERSED", "Payment reversed by PayPal", { refundId });
+      return moveTo(tx, "REFUNDED", "Refund completed", { refundId });
+    }
+    case "CUSTOMER.DISPUTE.CREATED":
+    case "CUSTOMER.DISPUTE.UPDATED":
+    case "CUSTOMER.DISPUTE.RESOLVED": {
+      // The disputed transaction is our capture.
+      const captureId = r.disputed_transactions?.map((t) => t.seller_transaction_id).find(Boolean);
+      const tx = captureId ? txFind("capture_id", captureId) : undefined;
+      if (!tx || !r.dispute_id) return undefined;
+      const dispute: TxDispute = {
+        id: r.dispute_id,
+        reason: r.reason,
+        status: r.status,
+        stage: r.dispute_life_cycle_stage,
+        outcome: r.dispute_outcome?.outcome_code,
+        amount: r.dispute_amount?.value,
+        updatedAt: now(),
+      };
+      const reason = (r.reason ?? "").toLowerCase().replace(/_/g, " ");
+      const type =
+        event.event_type === "CUSTOMER.DISPUTE.CREATED"
+          ? `Buyer opened a dispute${reason ? ` · ${reason}` : ""}`
+          : event.event_type === "CUSTOMER.DISPUTE.RESOLVED"
+            ? `Dispute resolved${dispute.outcome ? ` · ${dispute.outcome.toLowerCase().replace(/_/g, " ")}` : ""}`
+            : `Dispute updated${dispute.status ? ` · ${dispute.status.toLowerCase().replace(/_/g, " ")}` : ""}`;
+      return save(tx.id, { dispute }, { source: "paypal-webhook", type });
     }
     case "PAYMENT.AUTHORIZATION.CREATED": {
       const tx = (r.id && txFind("authorization_id", r.id)) || (related.order_id && txFind("order_id", related.order_id));

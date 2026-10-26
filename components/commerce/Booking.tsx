@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { BadgeCheck, CalendarClock, CheckCircle2, ExternalLink, MapPin, Star } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { CarId } from "@/lib/cars/types";
+import { slotLabel } from "@/lib/catalog/slots";
 import { commerce } from "@/lib/commerce/client";
 import type { RepairShop, Technician, Transaction } from "@/lib/commerce/types";
 import { useChat } from "@/lib/store/chat";
@@ -37,7 +38,7 @@ export function ShopReserve({ shop, carId, partId, issue }: { shop: RepairShop; 
       {done ? (
         <div className="rounded-lg border border-ok/30 bg-ok/10 px-2.5 py-2">
           <div className="flex items-center gap-1.5 font-semibold text-ok">
-            <CheckCircle2 size={14} /> {slot} reserved
+            <CheckCircle2 size={14} /> {slotLabel(slot, shop.timeZone)} reserved
           </div>
           <div className="mt-0.5 text-muted">
             {money(Number(done.amount))} deposit authorized (not charged). The shop captures it at check-in, or it&apos;s voided if you cancel.
@@ -56,7 +57,7 @@ export function ShopReserve({ shop, carId, partId, issue }: { shop: RepairShop; 
                 onClick={() => setSlot(s)}
                 className={clsx("flex items-center gap-1 rounded-lg border px-2 py-1", s === slot ? "border-accent bg-accent-soft text-accent" : "border-line text-muted hover:text-ink")}
               >
-                <CalendarClock size={12} /> {s}
+                <CalendarClock size={12} /> {slotLabel(s, shop.timeZone)}
               </button>
             ))}
           </div>
