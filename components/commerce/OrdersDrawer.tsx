@@ -1,13 +1,14 @@
 "use client";
 import clsx from "clsx";
-import { ExternalLink, Link2, Receipt, RefreshCw, ShieldAlert, Webhook, X, Zap } from "lucide-react";
+import { ExternalLink, Link2, Receipt, RefreshCw, ShieldAlert, Wallet, Webhook, X, Zap } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
-import { commerce } from "@/lib/commerce/client";
+import { commerce, mandates } from "@/lib/commerce/client";
 import { allowedOps } from "@/lib/commerce/ops";
-import type { ChangeKind, Transaction } from "@/lib/commerce/types";
+import type { ChangeKind, Mandate, Transaction } from "@/lib/commerce/types";
 import { useOrders } from "@/lib/store/orders";
 import { Button, IconButton, Modal, money } from "../ui";
+import { mandateScope } from "../chat/MandateCard";
 import { KIND, StatusPill } from "./txMeta";
 
 const OrdersLedger = dynamic(() => import("./OrdersLedger"), {
@@ -179,13 +180,37 @@ function totals(items: Transaction[]) {
   ];
 }
 
-/** Saved PayPal (Vault) for one-tap, and apps paired over OAuth (Claude). Both removable here. */
+/**
+ * Saved PayPal (Vault) for one-tap, the mechanic's spending limits, and apps paired over OAuth
+ * (Claude). All removable here.
+ */
 function Linked() {
   const wallet = useOrders((s) => s.wallet);
   const connections = useOrders((s) => s.connections);
   const forget = useOrders((s) => s.forget);
+  const updated = useOrders((s) => s.items.length);
   const [busy, setBusy] = useState<string | null>(null);
-  if (!wallet && !connections.length) return null;
+  const [limits, setLimits] = useState<Mandate[]>([]);
+  useEffect(() => {
+    let live = true;
+    mandates
+      .list()
+      .then((all) => live && setLimits(all.filter((m) => m.status === "active")))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [wallet, updated]);
+  if (!wallet && !connections.length && !limits.length) return null;
+  const revoke = async (id: string) => {
+    setBusy(id);
+    try {
+      await mandates.revoke(id);
+      setLimits((l) => l.filter((m) => m.id !== id));
+    } finally {
+      setBusy(null);
+    }
+  };
   const remove = async (what: "wallet" | "connections") => {
     setBusy(what);
     try {
@@ -202,6 +227,13 @@ function Linked() {
           <Button size="sm" variant="ghost" className="min-h-7 px-2" disabled={busy !== null} onClick={() => remove("wallet")}>Remove</Button>
         </span>
       )}
+      {limits.map((m) => (
+        <span key={m.id} className="inline-flex items-center gap-2 rounded-full border border-line bg-surface-2 py-1 pl-2.5 pr-1 text-xs">
+          <Wallet size={13} className="text-accent" /> Mechanic may buy {mandateScope(m).replace(" for your ", " · ")}
+          <span className="text-muted">· {money(Number(m.remaining))} left · until {new Date(m.expiresAt).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+          <Button size="sm" variant="ghost" className="min-h-7 px-2" disabled={busy !== null} onClick={() => revoke(m.id)}>Revoke</Button>
+        </span>
+      ))}
       {connections.length > 0 && (
         <span className="inline-flex items-center gap-2 rounded-full border border-line bg-surface-2 py-1 pl-2.5 pr-1 text-xs">
           <Link2 size={13} className="text-accent" /> Connected: {connections.map((c) => c.client).join(", ")}

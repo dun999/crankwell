@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { handle, json, requireSession } from "@/lib/server/http";
 import { listConnections, revokeConnections } from "@/lib/server/oauth";
+import { revokeAllMandates } from "@/lib/server/mandates";
 import { removeWallet, walletInfo } from "@/lib/server/wallet";
 
 export const runtime = "nodejs";
@@ -22,7 +23,11 @@ export async function DELETE(req: Request) {
   return handle(async () => {
     const session = requireSession(req);
     const b = z.object({ what: z.enum(["wallet", "connections"]) }).parse(await req.json());
-    if (b.what === "wallet") await removeWallet(session);
+    if (b.what === "wallet") {
+      // Spending limits pay with the saved PayPal, so they end with it.
+      revokeAllMandates(session);
+      await removeWallet(session);
+    }
     else revokeConnections(session);
     return json(view(session));
   });

@@ -18,6 +18,7 @@ const SafetyTestCard = dynamic(() => import("./Cards").then((m) => m.SafetyTestC
 const PartsCard = dynamic(() => import("./Cards").then((m) => m.PartsCard));
 const Replies = dynamic(() => import("./Cards").then((m) => m.Replies));
 const ConfirmCard = dynamic(() => import("./ConfirmCard").then((m) => m.ConfirmCard));
+const MandateCard = dynamic(() => import("./MandateCard").then((m) => m.MandateCard));
 const PreparingCheckout = dynamic(() => import("./Checkout").then((m) => m.PreparingCheckout));
 
 const SUGGESTIONS = [
@@ -251,6 +252,8 @@ const AssistantBlock = memo(function AssistantBlock({ b, msgId, idx }: { b: Bloc
           return <PartsCard e={b.event} />;
         case "action":
           return <ConfirmCard e={b.event} />;
+        case "mandate":
+          return <MandateCard e={b.event} />;
       }
   }
   // Tool steps live in the summary line; replies render after the message.

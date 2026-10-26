@@ -57,6 +57,16 @@ export function db(): DB {
     );
     CREATE INDEX IF NOT EXISTS action_session ON actions(session_id);
     CREATE INDEX IF NOT EXISTS action_case ON actions(case_id);
+    CREATE TABLE IF NOT EXISTS mandates (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      spent_cents INTEGER NOT NULL DEFAULT 0,
+      terms TEXT NOT NULL,
+      signature TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS mandate_session ON mandates(session_id);
     CREATE TABLE IF NOT EXISTS wallets (
       session_id TEXT PRIMARY KEY,
       vault_id TEXT NOT NULL,

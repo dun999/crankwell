@@ -242,10 +242,11 @@ export function cancelAction(id: string, sessionId: string): Action {
   return write(id, { status: "cancelled" }, "pending") ?? owned(id, sessionId);
 }
 
-function oneTapSpentToday(sessionId: string) {
+/** Charged with saved PayPal (one tap, or by the mechanic within a mandate) in the last 24 hours. */
+export function oneTapSpentToday(sessionId: string) {
   const since = Date.now() - 24 * 3600_000;
   return listActions(sessionId)
-    .filter((a) => a.via === "vault" && a.status === "confirmed" && a.confirmedAt && Date.parse(a.confirmedAt) > since)
+    .filter((a) => (a.via === "vault" || a.via === "mandate") && a.status === "confirmed" && a.confirmedAt && Date.parse(a.confirmedAt) > since)
     .reduce((sum, a) => sum + Number(a.amount), 0);
 }
 
@@ -321,7 +322,12 @@ function settled(tx: Transaction) {
  * The user's tap. Parts and deposits are paid with the saved PayPal wallet (Orders v2 with vault_id,
  * completed without a redirect); a technician visit sends the PayPal invoice.
  */
-export async function confirmAction(id: string, sessionId: string, opts: { origin: string; email?: string }): Promise<{ action: Action; tx?: Transaction }> {
+export async function confirmAction(
+  id: string,
+  sessionId: string,
+  /** `mandateId`: bought by the mechanic within that approved mandate (see mandates.ts), not tapped. */
+  opts: { origin: string; email?: string; mandateId?: string },
+): Promise<{ action: Action; tx?: Transaction }> {
   const a = owned(id, sessionId);
   if (a.status === "confirmed") return { action: a, tx: a.txId ? txGet(a.txId) : undefined };
   if (a.status === "expired") throw new CommerceError("This offer expired. Ask the mechanic to prepare it again.", 410);
@@ -350,15 +356,16 @@ export async function confirmAction(id: string, sessionId: string, opts: { origi
       tx = await sendTechnicianInvoice({ ...p, sessionId, email: email!, actionId: id });
     } else {
       const vault = { vaultId: walletVaultId(sessionId)! };
-      const r = p.kind === "parts" ? await createPartsOrder({ ...p, sessionId, origin: opts.origin, vault, actionId: id }) : await createDepositOrder({ ...p, sessionId, origin: opts.origin, vault, actionId: id });
+      const checkout = { sessionId, origin: opts.origin, vault, actionId: id, mandateId: opts.mandateId };
+      const r = p.kind === "parts" ? await createPartsOrder({ ...p, ...checkout }) : await createDepositOrder({ ...p, ...checkout });
       tx = r.tx;
     }
     if (!settled(tx)) {
       const action = write(id, { status: "pending", txId: undefined, error: "PayPal asked for approval this time. Continue to PayPal." })!;
       return { action, tx };
     }
-    const via = p.kind === "technician_invoice" ? "invoice" : "vault";
-    return { action: write(id, { status: "confirmed", txId: tx.id, via, confirmedAt: now() })!, tx };
+    const via = p.kind === "technician_invoice" ? "invoice" : opts.mandateId ? "mandate" : "vault";
+    return { action: write(id, { status: "confirmed", txId: tx.id, via, mandateId: opts.mandateId, confirmedAt: now() })!, tx };
   } catch (e) {
     write(id, { status: "pending", error: e instanceof Error ? e.message : "Payment failed" });
     throw e;

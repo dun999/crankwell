@@ -5,7 +5,7 @@ import { AllProvidersFailed } from "@/lib/agent/llm";
 import { runAgentTurn } from "@/lib/agent/loop";
 import { agentConfigured } from "@/lib/agent/model";
 import { CommerceError } from "@/lib/server/commerce";
-import { json, requireSession } from "@/lib/server/http";
+import { json, originOf, requireSession } from "@/lib/server/http";
 import { rateLimit } from "@/lib/server/ratelimit";
 import { overBudget } from "@/lib/server/telemetry";
 
@@ -70,6 +70,7 @@ export async function POST(req: Request) {
           view: { carId: b.view.carId, selectedPart: b.view.selectedPart, location: b.view.location },
           signal: req.signal,
           write,
+          origin: originOf(req),
         });
         const t = r.trace;
         write({

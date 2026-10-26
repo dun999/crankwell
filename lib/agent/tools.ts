@@ -12,6 +12,8 @@ import type { ActionPayload, RepairShop, SparePart, Technician } from "@/lib/com
 import { oneTapBlocker, prepareAction } from "@/lib/server/actions";
 import { CommerceError } from "@/lib/server/commerce";
 import { ordersForAgent } from "@/lib/server/reconcile";
+import { buyWithinMandate, proposeMandate, revokeAllMandates } from "@/lib/server/mandates";
+import { SYSTEM_IDS } from "@/lib/cars/types";
 import type { RecommendedAction, Suspect, UiEvent, ViewContext } from "./events";
 
 export const CarIdS = z.enum(["corolla", "crv"]);
@@ -122,6 +124,19 @@ const schemas = {
   }),
   prepare_action: PrepareActionS,
   get_orders: z.object({}),
+  propose_mandate: z.object({
+    car_id: CarIdS,
+    systems: z.array(z.enum(SYSTEM_IDS)).min(1).max(3).describe("Systems the user wants you to buy parts for, e.g. ['brakes']"),
+    per_order_max_usd: z.number().min(1).max(500).describe("Most one order may cost, including shipping"),
+    total_max_usd: z.number().min(1).max(1000).describe("Most all orders together may cost"),
+    days: z.number().int().min(1).max(30).optional().describe("How long it lasts (default 7)"),
+    reason: z.string().max(160).optional().describe("What the user asked for, in their words"),
+  }),
+  buy_within_mandate: z.object({
+    sku: z.string().max(60).describe("Exact SKU from show_parts or search_spare_parts"),
+    quantity: z.number().int().min(1).max(8).optional(),
+  }),
+  revoke_mandates: z.object({}),
   paypal_lookup: PayPalLookupS,
   prepare_order_change: OrderChangeS,
 } as const;
@@ -151,6 +166,11 @@ const DESCRIPTIONS: Record<ToolName, string> = {
     "Prepare a purchase the user asked for: buy a part, reserve a repair shop (refundable deposit hold) or book a mobile technician (PayPal invoice). The server prices it and shows a confirm card. Nothing is charged until the user taps Confirm (one tap with saved PayPal, otherwise PayPal approval). Call it only when the user asks you to buy, book or reserve, or accepts your suggestion. Use exact ids from the lookup tools.",
   get_orders:
     "Get the user's PayPal orders, shop reservations and technician invoices, with open ones checked live against PayPal (paypal_check), what can be changed on each (allowed_changes), plus anything still waiting for their confirmation.",
+  propose_mandate:
+    "Ask the user for a spending limit: permission to buy parts for some systems of their car with their saved PayPal, up to a per-order and a total amount, for some days. Shows a card; nothing is allowed until the user taps Allow. Use it only when the user asks you to buy without confirming each purchase (e.g. 'just order whatever brake parts it needs, up to $300'). Needs saved PayPal.",
+  buy_within_mandate:
+    "Buy a part right away with the user's saved PayPal, within a spending limit they approved (propose_mandate). Use it only when the user asked for that part (or for parts for that job) and an active limit covers it; get_orders lists the limits under spending_limits. The server checks the limit and refuses otherwise; then use prepare_action. The receipt lets the user undo (refund).",
+  revoke_mandates: "Stop all of the user's spending limits at once, e.g. when they say to stop buying for them. Purchases already made stay (refundable in Orders).",
   paypal_lookup:
     "Read one of the user's orders straight from PayPal with the PayPal Agent Toolkit: the payment record (captures, holds, refunds, invoice payments), shipment tracking, or buyer disputes. Use it when the user asks to double-check with PayPal, where their part is, or about a dispute. Use an order_ref from get_orders.",
   prepare_order_change:
@@ -171,6 +191,9 @@ export const TOOL_LABELS: Record<ToolName, string> = {
   suggest_replies: "Wrapping up",
   prepare_action: "Preparing your PayPal sandbox checkout",
   get_orders: "Checking your PayPal orders",
+  propose_mandate: "Preparing a spending limit for you to approve",
+  buy_within_mandate: "Buying within your spending limit",
+  revoke_mandates: "Stopping your spending limits",
   paypal_lookup: "Asking PayPal",
   prepare_order_change: "Preparing the change to your order",
 };
@@ -188,6 +211,7 @@ export interface ToolContext {
   sessionId: string;
   view: ViewContext;
   emit: (e: UiEvent) => void;
+  origin?: string;
 }
 
 export interface ToolResult {
@@ -404,10 +428,29 @@ async function exec(name: ToolName, input: unknown, ctx: ToolContext): Promise<u
     }
     case "get_orders": {
       schemas.get_orders.parse(input ?? {});
-      return ordersForAgent(ctx.sessionId);
+      return ordersForAgent(ctx.sessionId, { mandates: true });
     }
     case "paypal_lookup":
       return paypalLookup(schemas.paypal_lookup.parse(input), ctx.sessionId);
+    case "propose_mandate": {
+      const a = schemas.propose_mandate.parse(input);
+      const mandate = proposeMandate(ctx.sessionId, { carId: a.car_id, systems: a.systems, perOrderMax: a.per_order_max_usd, totalMax: a.total_max_usd, days: a.days, reason: a.reason });
+      ctx.emit({ type: "mandate", mandate });
+      return { status: "waiting_for_user", mandate_id: mandate.id, per_order_max_usd: mandate.perOrderMax, total_max_usd: mandate.totalMax, days: mandate.days, note: "Shown as a card. Nothing is allowed until the user taps Allow." };
+    }
+    case "buy_within_mandate": {
+      const a = schemas.buy_within_mandate.parse(input);
+      const r = await buyWithinMandate(ctx.sessionId, { sku: a.sku, quantity: a.quantity ?? 1 }, { origin: ctx.origin ?? process.env.PUBLIC_URL ?? "http://localhost:3000" });
+      ctx.emit({ type: "action", action: r.action, oneTap: true });
+      return r.action.status === "confirmed"
+        ? { status: "bought", order_ref: r.tx?.id, title: r.action.title, amount_usd: r.action.amount, paypal_capture_id: r.tx?.paypal.captureId, limit_left_usd: r.mandate.remaining, note: "Paid with saved PayPal. The receipt has Undo (refund)." }
+        : { status: "needs_approval", note: r.action.error ?? "PayPal asked the user to approve this one. The card is shown." };
+    }
+    case "revoke_mandates": {
+      schemas.revoke_mandates.parse(input ?? {});
+      const done = revokeAllMandates(ctx.sessionId);
+      return { revoked: done.length, note: done.length ? "No more purchases without the user's tap." : "There were no spending limits." };
+    }
     case "prepare_order_change": {
       const a = schemas.prepare_order_change.parse(input);
       const action = prepareAction(ctx.sessionId, { kind: a.change, txId: a.order_ref, reason: a.reason, hours: a.actual_hours }, { source: "app" });

@@ -2,8 +2,8 @@
 import clsx from "clsx";
 import { AlertTriangle, Check, Copy, CreditCard, ExternalLink, Loader2, Webhook } from "lucide-react";
 import { useEffect, useState } from "react";
-import { actions, type ActionStatus } from "@/lib/commerce/client";
-import { CHANGE_COPY, isChange } from "@/lib/commerce/ops";
+import { actions, commerce, type ActionStatus } from "@/lib/commerce/client";
+import { CHANGE_COPY, allowedOps, isChange } from "@/lib/commerce/ops";
 import type { Action } from "@/lib/commerce/types";
 import { useChat, type Block } from "@/lib/store/chat";
 import { useOrders } from "@/lib/store/orders";
@@ -94,7 +94,13 @@ export function PreparingCheckout({ b, msgId, idx }: { b: Extract<Block, { kind:
 }
 
 const DONE = { parts: "Payment complete", shop_deposit: "Deposit held", technician_invoice: "Invoice sent" };
-const VIA = { vault: "Paid with saved PayPal in one tap", approval: "Approved in PayPal", invoice: "Sent with PayPal Invoicing", change: "Done with PayPal from the chat" };
+const VIA = {
+  vault: "Paid with saved PayPal in one tap",
+  approval: "Approved in PayPal",
+  invoice: "Sent with PayPal Invoicing",
+  change: "Done with PayPal from the chat",
+  mandate: "Bought by the mechanic within your spending limit",
+};
 const fmt = (v: string) => `$${Number(v).toFixed(2)}`;
 
 /** The receipt once PayPal has it: invoice details, PayPal references and the live transaction status. */
@@ -231,6 +237,7 @@ export function Receipt({ action }: { action: Action }) {
         <Button size="sm" onClick={() => openOrders(true)}>
           View in Orders
         </Button>
+        {action.via === "mandate" && tx && allowedOps(tx).includes("refund") && <UndoPurchase txId={tx.id} />}
         {tx?.paypal.payerViewUrl && (
           <a href={tx.paypal.payerViewUrl} target="_blank" rel="noreferrer" className="touch-target inline-flex min-h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-accent hover:underline">
             Open PayPal invoice <ExternalLink size={12} />
@@ -239,6 +246,35 @@ export function Receipt({ action }: { action: Action }) {
         <span className="ml-auto text-[10.5px] text-faint">Test payment · no real money</span>
       </div>
     </div>
+  );
+}
+
+/** A purchase the mechanic made within a spending limit can be undone right from its receipt. */
+function UndoPurchase({ txId }: { txId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="danger"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setErr(null);
+          try {
+            await commerce.refund(txId);
+          } catch (e) {
+            setErr((e as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy && <Loader2 size={13} className="animate-spin" />} Undo · refund
+      </Button>
+      {err && <span className="text-[11px] text-danger">{err}</span>}
+    </>
   );
 }
 

@@ -97,6 +97,8 @@ export interface CheckoutOptions {
   /** Save PayPal for one-tap on approval, or pay with the saved wallet now. */
   vault?: pp.VaultOption;
   actionId?: string;
+  /** Bought by the mechanic within this spending mandate (saved PayPal, no tap). */
+  mandateId?: string;
   returnUrl?: string;
   cancelUrl?: string;
 }
@@ -127,8 +129,8 @@ export async function createPartsOrder(input: { sessionId: string; items: { sku:
     partId: input.partId,
     items: q.lines.map((l) => ({ sku: l.sp.sku, name: l.sp.name, quantity: l.quantity, unitPrice: l.sp.price.toFixed(2) })),
     paypal: {},
-    meta: input.actionId ? { actionId: input.actionId } : undefined,
-    events: [{ at: now(), source: "app", type: input.actionId ? "Order prepared by the mechanic" : "Order started" }],
+    meta: input.actionId ? { actionId: input.actionId, ...(input.mandateId ? { mandateId: input.mandateId } : {}) } : undefined,
+    events: [{ at: now(), source: "app", type: input.mandateId ? "Ordered by the mechanic within your spending limit" : input.actionId ? "Order prepared by the mechanic" : "Order started" }],
     createdAt: now(),
     updatedAt: now(),
   });
@@ -145,7 +147,7 @@ export async function createPartsOrder(input: { sessionId: string; items: { sku:
       shipTo: paidWithSavedWallet(input) ? walletShipTo(input.sessionId) : undefined,
     });
     let next = save(id, { paypal: { orderId: order.orderId } }, { source: "paypal-api", type: "PayPal order created", note: paidWithSavedWallet(input) ? "Orders v2 · saved PayPal" : `Orders v2 · ${order.status}` });
-    if (order.status === "COMPLETED") next = settleCapture(next, order, "Paid with saved PayPal · one tap");
+    if (order.status === "COMPLETED") next = settleCapture(next, order, input.mandateId ? "Paid with saved PayPal · within your spending limit" : "Paid with saved PayPal · one tap");
     return { orderId: order.orderId, approveUrl: order.approveUrl, tx: next };
   } catch (e) {
     save(id, { status: "FAILED" }, { source: "paypal-api", type: "Order creation failed", note: pp.paypalErrorMessage(e) });

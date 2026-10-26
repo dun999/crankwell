@@ -149,6 +149,8 @@ export async function runAgentTurn(opts: {
   view: ViewContext;
   signal: AbortSignal;
   write: (e: StreamEvent) => void;
+  /** This app's public origin, for PayPal return URLs on purchases the mechanic makes. */
+  origin?: string;
 }) {
   const { write } = opts;
   const started = Date.now();
@@ -157,7 +159,7 @@ export async function runAgentTurn(opts: {
     { role: "user", content: `${viewContextText(opts.view)}\n\n${opts.text}` },
   ];
   const emit = (e: UiEvent) => write({ event: "ui", data: e });
-  const ctx = { sessionId: opts.sessionId, view: opts.view, emit };
+  const ctx = { sessionId: opts.sessionId, view: opts.view, emit, origin: opts.origin };
   const trace: TurnTrace = { id: newTraceId(), provider: "", model: "", failover: false, ms: 0, llmCalls: 0, promptTokens: 0, completionTokens: 0, tools: [] };
   const finish = (stopReason: string | null) => {
     trace.ms = Date.now() - started;

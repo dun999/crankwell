@@ -1,5 +1,5 @@
 import type { CarId, SystemId } from "@/lib/cars/types";
-import type { Action, RepairShop, SparePart, Technician } from "@/lib/commerce/types";
+import type { Action, Mandate, RepairShop, SparePart, Technician } from "@/lib/commerce/types";
 
 // Events the agent route streams to the browser (Server-Sent Events).
 
@@ -59,6 +59,7 @@ export type UiEvent =
   | { type: "safety_tests"; intro: string; tests: SafetyTest[] }
   | { type: "recommendations"; carId: CarId; headline: string; actions: RecommendedAction[] }
   | { type: "action"; action: Action; oneTap: boolean }
+  | { type: "mandate"; mandate: Mandate }
   /** Parts with prices and Buy buttons; `pick` is the SKU the mechanic recommends. */
   | { type: "parts"; carId: CarId; headline: string; note?: string; groups: PartOffer[]; pick?: string }
   /** Tappable replies under the mechanic's message. */

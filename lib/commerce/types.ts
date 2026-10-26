@@ -192,14 +192,43 @@ export interface Action {
   policy: string;
   payload: ActionPayload;
   txId?: string;
-  /** How it was confirmed: one tap with saved PayPal, PayPal approval, a sent invoice, or a change to an order. */
-  via?: "vault" | "approval" | "invoice" | "change";
+  /**
+   * How it was confirmed: one tap with saved PayPal, PayPal approval, a sent invoice, a change to an
+   * order, or bought by the mechanic within a spending mandate the user approved.
+   */
+  via?: "vault" | "approval" | "invoice" | "change" | "mandate";
+  mandateId?: string;
   error?: string;
   createdAt: string;
   expiresAt: string;
   /** When the current confirm attempt started, so an interrupted one can be recovered. */
   confirmingSince?: string;
   confirmedAt?: string;
+}
+
+/**
+ * A spending mandate: the user lets the in-app mechanic buy parts for some systems of one car with
+ * their saved PayPal, up to a per-order and a total limit, until it expires or they revoke it.
+ * Amounts are USD strings.
+ */
+export interface Mandate {
+  id: string;
+  status: "proposed" | "active" | "revoked" | "expired" | "declined";
+  carId: string;
+  systems: string[];
+  perOrderMax: string;
+  totalMax: string;
+  spent: string;
+  remaining: string;
+  days: number;
+  /** Why the mechanic asked, in the user's words. */
+  reason?: string;
+  createdAt: string;
+  /** Proposed: the card's deadline. Active: when the mandate ends. */
+  expiresAt: string;
+  approvedAt?: string;
+  revokedAt?: string;
+  purchases: number;
 }
 
 /** Saved PayPal for one-tap, as the browser sees it (the vault token stays on the server). */

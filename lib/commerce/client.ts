@@ -1,5 +1,5 @@
 "use client";
-import type { Action, Transaction, WalletInfo } from "./types";
+import type { Action, Mandate, Transaction, WalletInfo } from "./types";
 import { sessionReady } from "@/lib/session";
 import { useOrders } from "@/lib/store/orders";
 
@@ -77,5 +77,22 @@ export const actions = {
   cancel: async (id: string) => {
     const r = await fetch(`/api/actions/${id}`, { method: "DELETE" });
     return ((await r.json()) as { action: Action }).action;
+  },
+};
+
+/** Spending limits: what the mechanic may buy without a card per purchase. */
+export const mandates = {
+  list: async (): Promise<Mandate[]> => {
+    await sessionReady();
+    const r = await fetch("/api/mandates");
+    return r.ok ? ((await r.json()) as { mandates: Mandate[] }).mandates : [];
+  },
+  approve: (id: string) => post<{ mandate: Mandate }>(`/api/mandates/${id}`, { action: "approve" }).then((r) => r.mandate),
+  revoke: async (id: string) => {
+    await sessionReady();
+    const r = await fetch(`/api/mandates/${id}`, { method: "DELETE" });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error ?? "Couldn't revoke");
+    return (data as { mandate: Mandate }).mandate;
   },
 };

@@ -4,6 +4,7 @@ import type { Transaction, TxStatus } from "@/lib/commerce/types";
 import { completeApproval, listActions, markActionSettled, recoverStuckActions } from "./actions";
 import { PAYOUT_FINAL, abandonCheckout, applyOrderState, awaitingBuyer, listTransactions, shipOrder, syncInvoice, syncPayout } from "./commerce";
 import { txPayoutsOpen, txStale, txUnshipped } from "./db";
+import { listMandates } from "./mandates";
 import * as pp from "./paypal";
 
 // Keeps our copy of every payment in line with PayPal when the browser or a webhook doesn't report
@@ -154,7 +155,7 @@ const withTimeout = <T>(p: Promise<T>, ms: number) =>
  * `paypal_check` says how fresh each status is: live (checked just now), final (can't change), or
  * unavailable (PayPal didn't answer; this is our last known status).
  */
-export async function ordersForAgent(sessionId: string, opts: { actionIds?: boolean } = {}) {
+export async function ordersForAgent(sessionId: string, opts: { actionIds?: boolean; mandates?: boolean } = {}) {
   const nowMs = Date.now();
   const all = listTransactions(sessionId).slice(0, 10);
   const verify = pp.isPayPalConfigured() ? all.filter((t) => LIVE.includes(t.status)).slice(0, VERIFY_MAX) : [];
@@ -174,7 +175,20 @@ export async function ordersForAgent(sessionId: string, opts: { actionIds?: bool
     }),
   );
   const waiting = listActions(sessionId).filter((x) => x.status === "pending");
+  const limits = opts.mandates ? listMandates(sessionId).filter((m) => m.status === "active" || m.status === "proposed") : [];
   return {
+    ...(opts.mandates
+      ? {
+          spending_limits: limits.map((m) => ({
+            status: m.status === "proposed" ? "waiting_for_user" : "active",
+            car_id: m.carId,
+            systems: m.systems,
+            per_order_max_usd: m.perOrderMax,
+            left_usd: m.remaining,
+            until: m.status === "active" ? m.expiresAt : undefined,
+          })),
+        }
+      : {}),
     waiting_for_confirmation: waiting.map((x) => ({ ...(opts.actionIds ? { action_id: x.id } : {}), title: x.title, amount_usd: x.amount, expires: x.expiresAt })),
     orders: all.map((orig) => {
       const t = synced.get(orig.id) ?? orig;
