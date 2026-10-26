@@ -25,6 +25,7 @@ const pp = vi.hoisted(() => {
     reauthorize: vi.fn(async () => ({ authorizationId: "AUTH-RENEWED", status: "CREATED", expires: "2026-12-20T00:00:00Z" })),
     captureAuthorization: vi.fn(async (authorizationId: string) => ({ captureId: `CAP-${authorizationId}`, status: "COMPLETED" })),
     getInvoice: vi.fn(),
+    addTracking: vi.fn(async () => ({ trackerId: "RC-TRACK", status: "SHIPPED" })),
     createAndSendInvoice: vi.fn(async () => ({ id: "INV2-RC", status: "SENT", detail: { invoice_number: "0009", metadata: {} } })),
   };
 });

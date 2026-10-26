@@ -47,6 +47,35 @@ export interface TxDispute {
   updatedAt: string;
 }
 
+/** Parts shipment, recorded as an Orders v2 tracker on the PayPal capture. */
+export interface TxShipment {
+  carrier: string;
+  trackingNumber: string;
+  trackerId: string;
+  status: string;
+  shippedAt: string;
+}
+
+/** A finished technician job: actual hours, and the unused labor refunded to the buyer. */
+export interface TxJob {
+  completedAt: string;
+  hours: number;
+  estimatedHours: number;
+  refunded: string;
+}
+
+/** The technician's share, paid with PayPal Payouts. */
+export interface TxPayout {
+  batchId: string;
+  itemId?: string;
+  status: string;
+  amount: string;
+  fee?: string;
+  payee: string;
+  receiver: string;
+  error?: string;
+}
+
 export interface Transaction {
   id: string;
   sessionId: string;
@@ -70,6 +99,11 @@ export interface Transaction {
     payerEmail?: string;
   };
   meta?: Record<string, unknown>;
+  /** Ship-to, as PayPal has it on the order. */
+  shipping?: { name?: string; address: string };
+  shipment?: TxShipment;
+  job?: TxJob;
+  payout?: TxPayout;
   dispute?: TxDispute;
   events: TxEvent[];
   createdAt: string;
@@ -125,7 +159,7 @@ export interface Technician {
 // ───────────────────────── Agent-prepared actions ─────────────────────────
 
 /** An after-sale change to one of the user's orders (see lib/commerce/ops.ts for when each applies). */
-export type ChangeKind = "refund" | "check_in" | "cancel_reservation" | "cancel_invoice";
+export type ChangeKind = "refund" | "check_in" | "cancel_reservation" | "cancel_invoice" | "complete_job";
 export type ActionKind = TxKind | ChangeKind;
 
 /** What the agent proposes. The server prices it from the catalog; only the user can confirm it. */
@@ -133,7 +167,7 @@ export type ActionPayload =
   | { kind: "parts"; carId: string; partId: string; items: { sku: string; quantity: number }[] }
   | { kind: "shop_deposit"; carId: string; partId?: string; shopId: string; slot: string; issue?: string; location?: { lat: number; lng: number } | null }
   | { kind: "technician_invoice"; carId: string; partId?: string; technicianId: string; when: string; hours: number; issue?: string; email?: string }
-  | { kind: ChangeKind; txId: string; reason?: string };
+  | { kind: ChangeKind; txId: string; reason?: string; /** complete_job: hours actually worked */ hours?: number };
 
 export type ChangePayload = Extract<ActionPayload, { txId: string }>;
 

@@ -20,6 +20,7 @@ export const OrderChangeS = z.object({
   order_ref: z.string().max(60).describe("The order_ref from get_orders"),
   change: z.enum(CHANGE_KINDS).describe("One of that order's allowed_changes from get_orders"),
   reason: z.string().max(120).optional().describe("Why, in the user's words, e.g. 'Ordered the wrong pads'"),
+  actual_hours: z.number().min(0.5).max(12).optional().describe("complete_job only: hours the technician actually worked, if the user said (defaults to the estimate)"),
 });
 
 export const SPECIALTIES = ["brakes", "engine", "transmission", "electrical", "suspension", "cooling", "exhaust", "tires", "body", "general"] as const;
@@ -144,7 +145,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   get_orders:
     "Get the user's PayPal orders, shop reservations and technician invoices, with open ones checked live against PayPal (paypal_check), what can be changed on each (allowed_changes), plus anything still waiting for their confirmation.",
   prepare_order_change:
-    "Prepare a change to an order the user already has: refund a part or captured deposit, check in at a shop (capture the held deposit), cancel a reservation (release the hold) or cancel an unpaid technician invoice. Call get_orders first and use its order_ref and one of allowed_changes. Shows a confirm card; nothing changes until the user taps it. Call it only when the user asks for that change.",
+    "Prepare a change to an order the user already has: refund a part or captured deposit, check in at a shop (capture the held deposit), cancel a reservation (release the hold), cancel an unpaid technician invoice, or complete_job when a paid technician visit is finished (refunds unused labor, pays the technician). Call get_orders first and use its order_ref and one of allowed_changes. Shows a confirm card; nothing changes until the user taps it. Call it only when the user asks for that change.",
 };
 
 /** What the user sees while a tool runs. */
@@ -389,7 +390,7 @@ async function exec(name: ToolName, input: unknown, ctx: ToolContext): Promise<u
     }
     case "prepare_order_change": {
       const a = schemas.prepare_order_change.parse(input);
-      const action = prepareAction(ctx.sessionId, { kind: a.change, txId: a.order_ref, reason: a.reason }, { source: "app" });
+      const action = prepareAction(ctx.sessionId, { kind: a.change, txId: a.order_ref, reason: a.reason, hours: a.actual_hours }, { source: "app" });
       ctx.emit({ type: "action", action, oneTap: true });
       return {
         prepared: action.title,

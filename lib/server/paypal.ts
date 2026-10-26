@@ -11,6 +11,7 @@ import {
   PaypalPaymentTokenCustomerType,
   PaypalPaymentTokenUsageType,
   PaypalWalletContextShippingPreference,
+  ResponseValidationError,
   StoreInVaultInstruction,
   VaultController,
   type Order,
@@ -139,8 +140,22 @@ export interface VaultInfo {
 }
 
 /** What happened to an order: payer action needed, or captured/authorized right away (saved wallet). */
+/** Where a parts order ships, as PayPal has it (the buyer's PayPal address, or the one we sent). */
+export interface ShipTo {
+  name?: string;
+  line1?: string;
+  line2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  countryCode: string;
+}
+
 export function orderOutcome(o: Order) {
-  const pay = o.purchaseUnits?.[0]?.payments;
+  const unit = o.purchaseUnits?.[0];
+  const pay = unit?.payments;
+  const ship = unit?.shipping;
+  const a = ship?.address;
   const cap = pay?.captures?.[0];
   const auth = pay?.authorizations?.[0];
   const v = o.paymentSource?.paypal?.attributes?.vault;
@@ -155,6 +170,10 @@ export function orderOutcome(o: Order) {
     expires: auth?.expirationTime,
     payer: o.paymentSource?.paypal?.emailAddress ?? o.payer?.emailAddress,
     vault: v?.id ? ({ id: v.id, status: v.status, customerId: v.customer?.id } satisfies VaultInfo) : undefined,
+    shipTo: a?.countryCode
+      ? ({ name: ship?.name?.fullName, line1: a.addressLine1, line2: a.addressLine2, city: a.adminArea2, state: a.adminArea1, postalCode: a.postalCode, countryCode: a.countryCode } satisfies ShipTo)
+      : undefined,
+    trackers: (ship?.trackers ?? []).map((t) => ({ id: t.id, status: t.status })),
   };
 }
 
@@ -168,8 +187,11 @@ export async function createOrder(input: {
   returnUrl: string;
   cancelUrl: string;
   vault?: VaultOption;
+  /** Ship-to for one-tap orders, which have no buyer redirect to collect it. */
+  shipTo?: ShipTo;
 }) {
   const itemTotal = input.lines.reduce((a, l) => a + l.unitPrice * l.quantity, 0);
+  const s = input.shipTo;
   const body: OrderRequest = {
     intent: input.intent === "CAPTURE" ? CheckoutPaymentIntent.Capture : CheckoutPaymentIntent.Authorize,
     purchaseUnits: [
@@ -190,6 +212,9 @@ export async function createOrder(input: {
           unitAmount: usd(l.unitPrice),
           category: l.physical ? ItemCategory.PhysicalGoods : ItemCategory.DigitalGoods,
         })),
+        ...(s && input.needsShipping
+          ? { shipping: { name: s.name ? { fullName: s.name } : undefined, address: { addressLine1: s.line1, addressLine2: s.line2, adminArea2: s.city, adminArea1: s.state, postalCode: s.postalCode, countryCode: s.countryCode } } }
+          : {}),
       },
     ],
     paymentSource: { paypal: walletSource(input) },
@@ -225,9 +250,24 @@ function walletSource(input: { needsShipping: boolean; returnUrl: string; cancel
 export type OrderOutcome = ReturnType<typeof orderOutcome>;
 
 /** Read an order as PayPal has it now (the source of truth when our copy may be stale). */
+/** PayPal JSON keys in the SDK's spelling (purchase_units → purchaseUnits, address_line_1 → addressLine1). */
+const camelKeys = (v: unknown): unknown =>
+  Array.isArray(v)
+    ? v.map(camelKeys)
+    : v && typeof v === "object"
+      ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase()), camelKeys(x)]))
+      : v;
+
 export async function getOrder(orderId: string) {
-  const { result } = await sdk().orders.getOrder({ id: orderId });
-  return orderOutcome(result);
+  try {
+    const { result } = await sdk().orders.getOrder({ id: orderId });
+    return orderOutcome(result);
+  } catch (e) {
+    // The SDK rejects some valid orders: PayPal returns `upc: {}` on tracker items, which its schema
+    // doesn't allow. Read those over REST instead.
+    if (!(e instanceof ResponseValidationError)) throw e;
+    return orderOutcome(camelKeys(await paypalRest(`/v2/checkout/orders/${encodeURIComponent(orderId)}`)) as Order);
+  }
 }
 
 /** Was this a 404 from PayPal (order expired or never existed)? */
@@ -279,14 +319,68 @@ export async function voidAuthorization(authorizationId: string, requestId: stri
   await sdk().payments.voidPayment({ authorizationId, paypalRequestId: requestId });
 }
 
-export async function refundCapture(captureId: string, requestId: string, note: string) {
+/** Refund a capture: all of it, or `amount` of it (a partial refund). */
+export async function refundCapture(captureId: string, requestId: string, note: string, amount?: number) {
   const { result } = await sdk().payments.refundCapturedPayment({
     captureId,
     prefer: "return=representation",
     paypalRequestId: requestId,
-    body: { noteToPayer: note.slice(0, 255) },
+    body: { noteToPayer: note.slice(0, 255), ...(amount !== undefined ? { amount: usd(amount) } : {}) },
   });
   return { refundId: result.id, status: result.status };
+}
+
+/**
+ * Add shipment tracking to a captured order (Orders v2 trackers). The buyer sees it on the payment in
+ * PayPal. The tracker id is "<captureId>-<trackingNumber>".
+ */
+export async function addTracking(orderId: string, input: { captureId: string; trackingNumber: string; carrierName: string }) {
+  const r = await paypalRest<{ purchase_units?: { shipping?: { trackers?: { id?: string; status?: string }[] } }[] }>(`/v2/checkout/orders/${encodeURIComponent(orderId)}/track`, {
+    method: "POST",
+    headers: { Prefer: "return=representation", "PayPal-Request-Id": `${input.captureId}-${input.trackingNumber}-track` },
+    body: {
+      capture_id: input.captureId,
+      tracking_number: input.trackingNumber,
+      carrier: "OTHER",
+      carrier_name_other: input.carrierName,
+      notify_payer: false,
+      // No items: the shipment is the whole order, and PayPal stores items with an empty `upc` that
+      // the SDK can't read back.
+    },
+  });
+  const tracker = r.purchase_units?.[0]?.shipping?.trackers?.find((t) => t.id?.endsWith(input.trackingNumber));
+  return { trackerId: tracker?.id ?? `${input.captureId}-${input.trackingNumber}`, status: tracker?.status ?? "SHIPPED" };
+}
+
+// ───────────────────────── Payouts (REST) ─────────────────────────
+
+export interface PayoutItem {
+  payout_item_id?: string;
+  transaction_status?: string;
+  payout_batch_id?: string;
+  payout_item_fee?: { value?: string };
+  payout_item?: { sender_item_id?: string; receiver?: string; amount?: { value?: string } };
+  errors?: { name?: string; message?: string };
+}
+
+/**
+ * Pay someone with PayPal Payouts. `senderBatchId` makes it idempotent: PayPal rejects a second batch
+ * with the same id.
+ */
+export async function createPayout(input: { senderBatchId: string; senderItemId: string; receiver: string; amount: number; subject: string; note: string }) {
+  const r = await paypalRest<{ batch_header: { payout_batch_id: string; batch_status: string } }>("/v1/payments/payouts", {
+    method: "POST",
+    body: {
+      sender_batch_header: { sender_batch_id: input.senderBatchId, email_subject: input.subject.slice(0, 255), email_message: input.note.slice(0, 1000) },
+      items: [{ recipient_type: "EMAIL", receiver: input.receiver, amount: { value: input.amount.toFixed(2), currency: "USD" }, note: input.note.slice(0, 4000), sender_item_id: input.senderItemId }],
+    },
+  });
+  return { batchId: r.batch_header.payout_batch_id, status: r.batch_header.batch_status };
+}
+
+export async function getPayoutBatch(batchId: string) {
+  const r = await paypalRest<{ batch_header: { batch_status: string }; items?: PayoutItem[] }>(`/v1/payments/payouts/${encodeURIComponent(batchId)}`);
+  return { status: r.batch_header.batch_status, item: r.items?.[0] };
 }
 
 // ───────────────────────── Invoicing v2 (REST) ─────────────────────────
@@ -302,6 +396,8 @@ interface InvoiceLine {
 export interface PayPalInvoice {
   id: string;
   status: string;
+  /** Once paid: the PayPal payment, which is a regular capture (refundable with Payments v2). */
+  payments?: { transactions?: { payment_id?: string; amount?: { value: string } }[] };
   detail: { invoice_number: string; metadata?: { recipient_view_url?: string; invoicer_view_url?: string } };
   amount?: { value: string; currency_code: string };
   primary_recipients?: { billing_info?: { email_address?: string } }[];

@@ -103,6 +103,7 @@ export function PartShop({ carId, partId, skus, onClose }: { carId: CarId; partI
       <PayPalPay
         createOrder={() => commerce.createPartsOrder({ items: [{ sku: pick.sku, quantity: qty }], carId, partId })}
         onApproved={async (orderId) => setDone(await commerce.capture(orderId))}
+        payLater={subtotal + shipping}
       />
     </div>
   );

@@ -115,6 +115,9 @@ export function db(): DB {
     );
     CREATE INDEX IF NOT EXISTS agent_turns_conv ON agent_turns(conversation_id);
   `);
+  // Columns added after the first release.
+  const has = (table: string, col: string) => (d.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === col);
+  if (!has("wallets", "ship_to")) d.exec("ALTER TABLE wallets ADD COLUMN ship_to TEXT");
   g.__fycDb = d;
   return d;
 }
@@ -196,6 +199,31 @@ export function txStale(statuses: Transaction["status"][], updatedBefore: string
     db()
       .prepare(`SELECT data FROM transactions WHERE status IN (${marks}) AND updated_at < ? AND created_at > ? ORDER BY updated_at ASC LIMIT ?`)
       .all(...statuses, updatedBefore, createdAfter, limit) as { data: string }[]
+  ).map((r) => JSON.parse(r.data) as Transaction);
+}
+
+/** Paid parts orders with no shipment yet, paid before `paidBefore`. */
+export function txUnshipped(paidBefore: string, createdAfter: string, limit = 25): Transaction[] {
+  return (
+    db()
+      .prepare(
+        `SELECT data FROM transactions WHERE kind = 'parts' AND status = 'COMPLETED' AND json_extract(data, '$.shipment') IS NULL
+         AND capture_id IS NOT NULL AND updated_at < ? AND created_at > ? ORDER BY updated_at ASC LIMIT ?`,
+      )
+      .all(paidBefore, createdAfter, limit) as { data: string }[]
+  ).map((r) => JSON.parse(r.data) as Transaction);
+}
+
+/** Transactions whose technician payout PayPal hasn't finished. */
+export function txPayoutsOpen(final: string[], limit = 25): Transaction[] {
+  const marks = final.map(() => "?").join(", ");
+  return (
+    db()
+      .prepare(
+        `SELECT data FROM transactions WHERE json_extract(data, '$.payout.batchId') != ''
+         AND json_extract(data, '$.payout.status') NOT IN (${marks}) ORDER BY updated_at ASC LIMIT ?`,
+      )
+      .all(...final, limit) as { data: string }[]
   ).map((r) => JSON.parse(r.data) as Transaction);
 }
 

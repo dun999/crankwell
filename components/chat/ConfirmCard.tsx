@@ -7,7 +7,7 @@ import { CHANGE_COPY, isChange } from "@/lib/commerce/ops";
 import type { Action } from "@/lib/commerce/types";
 import { useOrders } from "@/lib/store/orders";
 import { ActionSummary } from "../commerce/ActionSummary";
-import { PayPalPay } from "../commerce/PayPalRoot";
+import { PayPalPay, payLaterFits } from "../commerce/PayPalRoot";
 import { Button } from "../ui";
 import { Receipt } from "./Checkout";
 
@@ -94,7 +94,7 @@ export function ConfirmCard({ e }: { e: ActionEvent }) {
           </p>
         ) : change ? (
           <div className="space-y-1.5">
-            <Button variant={action.kind === "check_in" ? "primary" : "danger"} className="h-11 w-full text-[14px]" disabled={busy} onClick={confirm}>
+            <Button variant={change.tone} className="h-11 w-full text-[14px]" disabled={busy} onClick={confirm}>
               {busy && <Loader2 size={15} className="animate-spin" />} {change.button}
               {action.kind === "refund" || action.kind === "check_in" ? ` · $${Number(action.amount).toFixed(2)}` : ""}
             </Button>
@@ -126,11 +126,15 @@ export function ConfirmCard({ e }: { e: ActionEvent }) {
                 const r = await actions.complete(action.id, orderId);
                 if (r.action) setAction(r.action);
               }}
+              payLater={action.kind === "parts" && !save ? Number(action.amount) : undefined}
             />
             <label className="flex items-start gap-2 text-[11.5px] text-muted">
               <input type="checkbox" checked={save} onChange={(x) => setSave(x.target.checked)} className="mt-0.5 accent-[var(--accent)]" />
               <span>Save PayPal so next time it&apos;s one tap. You can remove it in Orders.</span>
             </label>
+            {save && action.kind === "parts" && payLaterFits(Number(action.amount)) && (
+              <p className="text-[11px] text-muted">Want to pay over time? Untick save to see PayPal Pay Later.</p>
+            )}
             <p className="text-[11px] text-faint">Test payment: log in with a PayPal sandbox buyer account. No real money moves.</p>
           </div>
         )}

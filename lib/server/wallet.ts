@@ -10,6 +10,7 @@ interface WalletRow {
   vault_id: string;
   customer_id: string | null;
   payer_email: string | null;
+  ship_to: string | null;
   created_at: string;
 }
 
@@ -18,6 +19,17 @@ const getRow = (sessionId: string) => db().prepare("SELECT * FROM wallets WHERE 
 /** The vault token to charge for one-tap, if this session saved PayPal. */
 export function walletVaultId(sessionId: string): string | undefined {
   return getRow(sessionId)?.vault_id;
+}
+
+/** Where one-tap parts ship: the address from the PayPal approval that saved the wallet. */
+export function walletShipTo(sessionId: string): pp.ShipTo | undefined {
+  const raw = getRow(sessionId)?.ship_to;
+  return raw ? (JSON.parse(raw) as pp.ShipTo) : undefined;
+}
+
+/** Remember the buyer's PayPal ship-to for later one-tap orders (they have no PayPal page to pick one). */
+export function rememberShipTo(sessionId: string, shipTo: pp.ShipTo) {
+  db().prepare("UPDATE wallets SET ship_to = ? WHERE session_id = ?").run(JSON.stringify(shipTo), sessionId);
 }
 
 export function walletInfo(sessionId: string): WalletInfo | null {

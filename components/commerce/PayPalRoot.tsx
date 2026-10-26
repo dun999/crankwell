@@ -1,11 +1,24 @@
 "use client";
-import { PayPalOneTimePaymentButton, PayPalProvider, usePayPal } from "@paypal/react-paypal-js/sdk-v6";
+import {
+  PayLaterOneTimePaymentButton,
+  PayPalOneTimePaymentButton,
+  PayPalProvider,
+  useEligibleMethods,
+  usePayPal,
+  usePayPalMessages,
+} from "@paypal/react-paypal-js/sdk-v6";
 import { AlertTriangle, Loader2 } from "lucide-react";
+import { useTheme } from "next-themes";
 import { useState } from "react";
 
 const CLIENT_ID = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID;
 export const paypalConfigured = Boolean(CLIENT_ID);
 export type PayState = { kind: "idle" } | { kind: "working"; text: string } | { kind: "error"; text: string };
+
+/** PayPal Pay Later (Pay in 4) covers one-time purchases in this range. */
+const PAY_LATER_MIN = 30;
+const PAY_LATER_MAX = 1500;
+export const payLaterFits = (amount: number) => amount >= PAY_LATER_MIN && amount <= PAY_LATER_MAX;
 
 /**
  * Mount the SDK provider only with a checkout. The SDK loader shares its
@@ -18,10 +31,16 @@ export function PayPalPay({
   createOrder,
   onApproved,
   disabled,
+  payLater,
 }: {
   createOrder: () => Promise<string>;
   onApproved: (orderId: string) => Promise<void>;
   disabled?: boolean;
+  /**
+   * Also offer Pay Later (button + message) for this total. Only for orders captured now: not deposit
+   * holds and not checkouts that save PayPal for one-tap (Pay Later can't be vaulted).
+   */
+  payLater?: number;
 }) {
   const [state, setState] = useState<PayState>({ kind: "idle" });
   if (!paypalConfigured) {
@@ -35,10 +54,11 @@ export function PayPalPay({
     );
   }
   return (
-    <PayPalProvider clientId={CLIENT_ID} environment="sandbox" components={["paypal-payments"]} pageType="checkout">
+    <PayPalProvider clientId={CLIENT_ID} environment="sandbox" components={["paypal-payments", "paypal-messages"]} pageType="checkout">
       <div className="space-y-1.5">
         <PayPalButtonInner
           disabled={disabled || state.kind === "working"}
+          payLater={payLater !== undefined && payLaterFits(payLater) ? payLater : undefined}
           createOrder={async () => {
             setState({ kind: "working", text: "Creating PayPal order…" });
             try {
@@ -75,6 +95,7 @@ export function PayPalPay({
 
 function PayPalButtonInner(props: {
   disabled?: boolean;
+  payLater?: number;
   createOrder: () => Promise<{ orderId: string }>;
   onApprove: (d: { orderId: string }) => Promise<void>;
   onCancel: () => void;
@@ -98,6 +119,34 @@ function PayPalButtonInner(props: {
         onCancel={props.onCancel}
         onError={props.onError}
       />
+      {props.payLater !== undefined && <PayLater amount={props.payLater} {...props} />}
+    </div>
+  );
+}
+
+/**
+ * Pay Later: PayPal's message ("Pay in 4 interest-free payments…") and, when PayPal says this buyer is
+ * eligible, its button. It approves the same server-created order, so capture is unchanged.
+ */
+function PayLater({ amount, ...props }: Parameters<typeof PayPalButtonInner>[0] & { amount: number }) {
+  const value = amount.toFixed(2);
+  const { eligiblePaymentMethods, isLoading } = useEligibleMethods({ payload: { amount: value, currencyCode: "USD", paymentFlow: "ONE_TIME_PAYMENT" } });
+  const { error } = usePayPalMessages({});
+  const { resolvedTheme } = useTheme();
+  const eligible = !isLoading && Boolean(eligiblePaymentMethods?.isEligible("paylater"));
+  return (
+    <div className="mt-1.5 space-y-1.5">
+      {eligible && (
+        <PayLaterOneTimePaymentButton
+          presentationMode="auto"
+          createOrder={props.createOrder}
+          onApprove={props.onApprove}
+          onCancel={props.onCancel}
+          onError={props.onError}
+        />
+      )}
+      {/* Sandbox: messages render for a US buyer; PayPal picks the offer for the amount. */}
+      {!error && <paypal-message auto-bootstrap={true} amount={value} currency-code="USD" buyer-country="US" logo-type="WORDMARK" text-color={resolvedTheme === "dark" ? "WHITE" : "BLACK"} />}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import "server-only";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { getPart, isCarId } from "@/lib/cars";
 import { FREE_SHIPPING_OVER, SHIPPING_FLAT, findSku } from "@/lib/catalog/spare-parts";
 import { getShop, getTechnician, slotOpen } from "@/lib/catalog/providers";
@@ -8,7 +8,7 @@ import type { Transaction, TxDispute, TxEvent, TxStatus } from "@/lib/commerce/t
 import { publishTx } from "./bus";
 import { txFind, txGet, txInsert, txList, txUpdate } from "./db";
 import * as pp from "./paypal";
-import { forgetVaultToken, saveWallet } from "./wallet";
+import { forgetVaultToken, rememberShipTo, saveWallet, walletShipTo } from "./wallet";
 
 export class CommerceError extends Error {
   constructor(
@@ -21,6 +21,8 @@ export class CommerceError extends Error {
 
 const now = () => new Date().toISOString();
 const round2 = (n: number) => Math.round(n * 100) / 100;
+const fmt = (n: number) => `$${n.toFixed(2)}`;
+const formatShipTo = (s: pp.ShipTo) => ({ name: s.name, address: [s.line1, s.line2, s.city, [s.state, s.postalCode].filter(Boolean).join(" "), s.countryCode].filter(Boolean).join(", ") });
 
 function owned(txId: string, sessionId: string): Transaction {
   const tx = txGet(txId);
@@ -140,6 +142,7 @@ export async function createPartsOrder(input: { sessionId: string; items: { sku:
       needsShipping: true,
       ...returnUrls(input),
       vault: input.vault,
+      shipTo: paidWithSavedWallet(input) ? walletShipTo(input.sessionId) : undefined,
     });
     let next = save(id, { paypal: { orderId: order.orderId } }, { source: "paypal-api", type: "PayPal order created", note: paidWithSavedWallet(input) ? "Orders v2 · saved PayPal" : `Orders v2 · ${order.status}` });
     if (order.status === "COMPLETED") next = settleCapture(next, order, "Paid with saved PayPal · one tap");
@@ -157,9 +160,10 @@ function settleCapture(tx: Transaction, r: pp.OrderOutcome, label = "Payment cap
   if (cur.status === "COMPLETED" && cur.paypal.captureId && cur.paypal.captureId === r.captureId) return cur;
   const ok = r.captureStatus === "COMPLETED" || r.captureStatus === "PENDING";
   if (r.vault?.status === "VAULTED") saveWallet(tx.sessionId, r.vault, r.payer);
+  if (r.vault?.status === "VAULTED" && r.shipTo) rememberShipTo(tx.sessionId, r.shipTo);
   return save(
     tx.id,
-    { status: ok ? "COMPLETED" : "DENIED", paypal: { captureId: r.captureId, payerEmail: r.payer } },
+    { status: ok ? "COMPLETED" : "DENIED", paypal: { captureId: r.captureId, payerEmail: r.payer }, ...(r.shipTo ? { shipping: formatShipTo(r.shipTo) } : {}) },
     { source: "paypal-api", type: ok ? label : "Capture declined", note: `capture ${r.captureStatus}${r.vault?.status === "VAULTED" ? " · PayPal saved for one-tap" : ""}` },
   );
 }
@@ -372,7 +376,9 @@ export async function sendTechnicianInvoice(input: {
 }
 
 function invoiceStatus(s: string): TxStatus {
-  if (s === "PAID" || s === "MARKED_AS_PAID") return "PAID";
+  // A partial refund (unused labor) leaves the invoice paid.
+  if (s === "PAID" || s === "MARKED_AS_PAID" || s === "PARTIALLY_PAID" || s === "PARTIALLY_REFUNDED") return "PAID";
+  if (s === "REFUNDED") return "REFUNDED";
   if (s === "CANCELLED") return "CANCELLED";
   if (s === "DRAFT") return "DRAFT";
   if (s === "UNPAID") return "UNPAID";
@@ -386,8 +392,13 @@ export async function syncInvoice(tx: Transaction) {
     throw new CommerceError(pp.paypalErrorMessage(e), 502);
   });
   const status = invoiceStatus(inv.status);
-  if (status === tx.status || RANK[status] < RANK[tx.status]) return tx;
-  return save(tx.id, { status, paypal: { payerViewUrl: inv.detail.metadata?.recipient_view_url ?? tx.paypal.payerViewUrl } }, { source: "paypal-api", type: `Invoice ${inv.status.toLowerCase().replace(/_/g, " ")}` });
+  const captureId = tx.paypal.captureId ?? inv.payments?.transactions?.find((t) => t.payment_id)?.payment_id;
+  if (status === tx.status || RANK[status] < RANK[tx.status]) return captureId && !tx.paypal.captureId ? save(tx.id, { paypal: { captureId } }) : tx;
+  return save(
+    tx.id,
+    { status, paypal: { captureId, payerViewUrl: inv.detail.metadata?.recipient_view_url ?? tx.paypal.payerViewUrl } },
+    { source: "paypal-api", type: `Invoice ${inv.status.toLowerCase().replace(/_/g, " ")}` },
+  );
 }
 
 export async function refreshInvoice(txId: string, sessionId: string) {
@@ -403,6 +414,112 @@ export async function cancelInvoice(txId: string, sessionId: string) {
     throw new CommerceError(pp.paypalErrorMessage(e), 502);
   }
   return save(tx.id, { status: "CANCELLED" }, { source: "paypal-api", type: "Invoice cancelled" });
+}
+
+/** The technician's share of what a job earned; the rest is Crankwell's fee. */
+export const TECH_SHARE = 0.85;
+
+/** Where technician payouts go: the technician's PayPal (one sandbox payee stands in for every seeded technician). */
+export const payoutReceiver = () => process.env.PAYOUT_RECEIVER_EMAIL || undefined;
+
+/** Settle a finished visit: hours worked (at most the estimate), unused labor, the technician's payout. */
+export function quoteJob(tx: Transaction, hours?: number) {
+  const tech = getTechnician(String(tx.meta?.technicianId ?? ""));
+  if (!tech) throw new CommerceError("Unknown technician");
+  const estimated = Number(tx.meta?.hours ?? 1);
+  const actual = Math.min(estimated, Math.max(0.5, Math.round((hours ?? estimated) * 2) / 2));
+  const unused = round2((estimated - actual) * tech.hourlyRate);
+  const earned = round2(tech.calloutFee + actual * tech.hourlyRate);
+  return { tech, estimated, actual, unused, earned, payout: round2(earned * TECH_SHARE) };
+}
+
+/**
+ * The technician finished: refund the unused labor estimate to the buyer (a partial refund of the
+ * invoice payment, Payments v2), then pay the technician their share with PayPal Payouts.
+ */
+export async function completeJob(txId: string, sessionId: string, hours?: number) {
+  let tx = owned(txId, sessionId);
+  if (tx.kind !== "technician_invoice" || tx.status !== "PAID") throw new CommerceError("Only a paid technician visit can be marked done");
+  if (tx.job) return tx;
+  const q = quoteJob(tx, hours);
+  if (!tx.paypal.captureId) tx = await syncInvoice(tx);
+  const captureId = tx.paypal.captureId;
+  let refundId: string | undefined;
+  if (q.unused > 0) {
+    if (!captureId) throw new CommerceError("PayPal hasn't reported the invoice payment yet. Try again in a minute.", 409);
+    try {
+      const r = await pp.refundCapture(captureId, `${tx.id}-unused-labor`, `Unused labor: ${q.estimated - q.actual} h of the ${q.estimated} h estimate`, q.unused);
+      refundId = r.refundId;
+    } catch (e) {
+      throw new CommerceError(pp.paypalErrorMessage(e), 502);
+    }
+  }
+  tx = save(
+    tx.id,
+    { job: { completedAt: now(), hours: q.actual, estimatedHours: q.estimated, refunded: q.unused.toFixed(2) }, paypal: { refundId: refundId ?? tx.paypal.refundId } },
+    {
+      source: "paypal-api",
+      type: q.unused > 0 ? `Job done · ${fmt(q.unused)} unused labor refunded` : "Job done · the full estimate was used",
+      note: `${q.actual} h of ${q.estimated} h${refundId ? ` · Payments v2 partial refund ${refundId}` : ""}`,
+    },
+  );
+  return payTechnician(tx, q);
+}
+
+async function payTechnician(tx: Transaction, q: ReturnType<typeof quoteJob>) {
+  const receiver = payoutReceiver();
+  const base = { amount: q.payout.toFixed(2), payee: q.tech.name, receiver: receiver ?? "" };
+  if (!receiver) return save(tx.id, {}, { source: "app", type: "Technician payout skipped", note: "No payee configured (PAYOUT_RECEIVER_EMAIL)" });
+  try {
+    const r = await pp.createPayout({
+      senderBatchId: `${tx.id}-payout`,
+      senderItemId: tx.id,
+      receiver,
+      amount: q.payout,
+      subject: `Crankwell payout: ${tx.title}`,
+      note: `${q.tech.name}: call-out + ${q.actual} h labor, ${Math.round(TECH_SHARE * 100)}% share`,
+    });
+    return save(
+      tx.id,
+      { payout: { ...base, batchId: r.batchId, status: r.status } },
+      { source: "paypal-api", type: `${q.tech.name} paid ${fmt(q.payout)} with PayPal Payouts`, note: `batch ${r.batchId} · ${r.status.toLowerCase()} · ${Math.round(TECH_SHARE * 100)}% of ${fmt(q.earned)}` },
+    );
+  } catch (e) {
+    const error = pp.paypalErrorMessage(e);
+    return save(tx.id, { payout: { ...base, batchId: "", status: "FAILED", error } }, { source: "paypal-api", type: "Technician payout failed", note: error });
+  }
+}
+
+export const PAYOUT_FINAL = ["SUCCESS", "FAILED", "RETURNED", "REFUNDED", "REVERSED", "BLOCKED", "DENIED", "CANCELED"];
+export const payoutOpen = (tx: Transaction) => Boolean(tx.payout?.batchId && !PAYOUT_FINAL.includes(tx.payout.status));
+
+function applyPayoutItem(tx: Transaction, item: pp.PayoutItem, source: TxEvent["source"]) {
+  const p = tx.payout;
+  if (!p) return tx;
+  const status = item.transaction_status ?? p.status;
+  const next = { ...p, status, itemId: item.payout_item_id ?? p.itemId, fee: item.payout_item_fee?.value ?? p.fee, error: item.errors?.message ?? p.error };
+  if (status === p.status) return next.itemId !== p.itemId || next.fee !== p.fee ? save(tx.id, { payout: next }) : tx;
+  return save(tx.id, { payout: next }, { source, type: `Technician payout ${status.toLowerCase()}`, note: item.payout_item_id ? `item ${item.payout_item_id}` : undefined });
+}
+
+/** Re-read a pending payout from PayPal. */
+export async function syncPayout(tx: Transaction) {
+  if (!payoutOpen(tx)) return tx;
+  const b = await pp.getPayoutBatch(tx.payout!.batchId);
+  return applyPayoutItem(tx, b.item ?? { transaction_status: b.status }, "paypal-api");
+}
+
+/** Simulated fulfilment: a carrier number, added to the PayPal order as an Orders v2 tracker. */
+export async function shipOrder(tx: Transaction) {
+  if (tx.kind !== "parts" || tx.status !== "COMPLETED" || !tx.paypal.orderId || !tx.paypal.captureId || tx.shipment) return tx;
+  const trackingNumber = `CW1Z${createHash("sha256").update(tx.id).digest("hex").slice(0, 10).toUpperCase()}`;
+  const carrier = "Crankwell Express (sandbox)";
+  const t = await pp.addTracking(tx.paypal.orderId, { captureId: tx.paypal.captureId, trackingNumber, carrierName: carrier });
+  return save(
+    tx.id,
+    { shipment: { carrier, trackingNumber, trackerId: t.trackerId, status: t.status, shippedAt: now() } },
+    { source: "paypal-api", type: `Shipped · ${carrier} ${trackingNumber}`, note: "Tracking added to the PayPal order (Orders v2 trackers)" },
+  );
 }
 
 export function listTransactions(sessionId: string) {
@@ -450,9 +567,12 @@ export function abandonCheckout(tx: Transaction, note: string) {
 type Resource = {
   id?: string;
   status?: string;
-  invoice?: { id?: string; status?: string };
+  invoice?: { id?: string; status?: string; payments?: { transactions?: { payment_id?: string }[] } };
   supplementary_data?: { related_ids?: { order_id?: string; authorization_id?: string; capture_id?: string } };
   links?: { rel: string; href: string }[];
+  // Refunds
+  amount?: { value?: string };
+  seller_payable_breakdown?: { total_refunded_amount?: { value?: string } };
   // Vault payment tokens
   metadata?: { order_id?: string };
   // Disputes
@@ -506,6 +626,12 @@ export function applyWebhook(event: { event_type: string; resource: Resource }):
       if (!tx) return undefined;
       const refundId = r.id !== captureId ? r.id : tx.paypal.refundId;
       if (event.event_type === "PAYMENT.CAPTURE.REVERSED") return moveTo(tx, "REVERSED", "Payment reversed by PayPal", { refundId });
+      // A partial refund (unused labor on a finished job) leaves the payment in place.
+      const refunded = Number(r.seller_payable_breakdown?.total_refunded_amount?.value ?? r.amount?.value ?? NaN);
+      if (refunded > 0 && refunded < Number(tx.amount) - 0.005) {
+        if (tx.events.some((e) => e.type.startsWith("Partial refund") && e.note?.includes(r.id ?? "-"))) return tx;
+        return save(tx.id, { paypal: { refundId } }, { source: "paypal-webhook", type: `Partial refund completed · ${fmt(refunded)} of ${fmt(Number(tx.amount))}`, note: `refund ${r.id}` });
+      }
       return moveTo(tx, "REFUNDED", "Refund completed", { refundId });
     }
     case "CUSTOMER.DISPUTE.CREATED":
@@ -548,6 +674,20 @@ export function applyWebhook(event: { event_type: string; resource: Resource }):
       saveWallet(tx.sessionId, { id: r.id, status: "VAULTED", customerId: r.customer?.id }, r.payment_source?.paypal?.email_address);
       return save(tx.id, {}, { source: "paypal-webhook", type: "PayPal saved for one-tap" });
     }
+    case "PAYMENT.PAYOUTS-ITEM.SUCCEEDED":
+    case "PAYMENT.PAYOUTS-ITEM.FAILED":
+    case "PAYMENT.PAYOUTS-ITEM.UNCLAIMED":
+    case "PAYMENT.PAYOUTS-ITEM.RETURNED":
+    case "PAYMENT.PAYOUTS-ITEM.BLOCKED":
+    case "PAYMENT.PAYOUTS-ITEM.DENIED":
+    case "PAYMENT.PAYOUTS-ITEM.HELD":
+    case "PAYMENT.PAYOUTS-ITEM.CANCELED":
+    case "PAYMENT.PAYOUTS-ITEM.REFUNDED": {
+      // The item's sender_item_id is our transaction id.
+      const item = r as pp.PayoutItem;
+      const tx = item.payout_item?.sender_item_id ? txGet(item.payout_item.sender_item_id) : undefined;
+      return tx?.payout ? applyPayoutItem(tx, item, "paypal-webhook") : undefined;
+    }
     case "VAULT.PAYMENT-TOKEN.DELETED": {
       if (r.id) forgetVaultToken(r.id);
       return undefined;
@@ -558,7 +698,10 @@ export function applyWebhook(event: { event_type: string; resource: Resource }):
       const invoiceId = r.invoice?.id ?? r.id;
       const tx = invoiceId ? txFind("invoice_id", invoiceId) : undefined;
       if (!tx) return undefined;
-      if (event.event_type === "INVOICING.INVOICE.PAID") return moveTo(tx, "PAID", "Invoice paid. Visit confirmed");
+      if (event.event_type === "INVOICING.INVOICE.PAID") {
+        const captureId = r.invoice?.payments?.transactions?.find((t) => t.payment_id)?.payment_id;
+        return moveTo(tx, "PAID", "Invoice paid. Visit confirmed", captureId ? { captureId } : {});
+      }
       if (event.event_type === "INVOICING.INVOICE.CANCELLED") return moveTo(tx, "CANCELLED", "Invoice cancelled");
       return save(tx.id, {}, { source: "paypal-webhook", type: "Invoice updated" });
     }

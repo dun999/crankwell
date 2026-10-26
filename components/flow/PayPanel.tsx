@@ -107,7 +107,7 @@ export function PayPanel({ initial, notice }: { initial: Action; notice?: { kind
       {notice?.kind === "cancelled" && <p className="rounded-xl bg-surface-2 px-3 py-2 text-sm text-muted">PayPal checkout was cancelled. Nothing was charged.</p>}
       {change ? (
         s.mine ? (
-          <Button variant={a.kind === "check_in" ? "primary" : "danger"} className="h-12 w-full text-[15px]" disabled={!!busy} onClick={() => run("confirm", async () => setS({ ...s, ...(await post<Status>(`/api/actions/${a.id}/confirm`, {})) }))}>
+          <Button variant={change.tone} className="h-12 w-full text-[15px]" disabled={!!busy} onClick={() => run("confirm", async () => setS({ ...s, ...(await post<Status>(`/api/actions/${a.id}/confirm`, {})) }))}>
             {busy === "confirm" && <Loader2 size={15} className="animate-spin" />} {change.button}
           </Button>
         ) : (

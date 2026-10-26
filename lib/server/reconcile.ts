@@ -2,8 +2,8 @@ import "server-only";
 import { allowedOps } from "@/lib/commerce/ops";
 import type { Transaction, TxStatus } from "@/lib/commerce/types";
 import { completeApproval, listActions, markActionSettled, recoverStuckActions } from "./actions";
-import { abandonCheckout, applyOrderState, awaitingBuyer, listTransactions, syncInvoice } from "./commerce";
-import { txStale } from "./db";
+import { PAYOUT_FINAL, abandonCheckout, applyOrderState, awaitingBuyer, listTransactions, shipOrder, syncInvoice, syncPayout } from "./commerce";
+import { txPayoutsOpen, txStale, txUnshipped } from "./db";
 import * as pp from "./paypal";
 
 // Keeps our copy of every payment in line with PayPal when the browser or a webhook doesn't report
@@ -17,6 +17,9 @@ const INVOICE_EVERY_MS = 10 * 60_000;
 /** A checkout still open after this long was abandoned. */
 const ABANDON_MS = 24 * 3600_000;
 const ORDER_LOOKBACK_MS = 3 * 24 * 3600_000;
+/** Simulated fulfilment: a paid parts order ships (gets a PayPal tracker) about a minute after payment. */
+const SHIP_AFTER_MS = 60_000;
+const PAYOUT_EVERY_MS = 5 * 60_000;
 const INVOICE_LOOKBACK_MS = 30 * 24 * 3600_000;
 const PER_RUN = 25;
 
@@ -60,6 +63,32 @@ export async function syncWithPayPal(tx: Transaction, nowMs = Date.now()): Promi
 
 const due = (tx: Transaction, every: number, nowMs: number) => nowMs - (st.checked.get(tx.id) ?? 0) >= every;
 
+/** Ship paid parts orders (PayPal tracker) and follow pending technician payouts. Returns failures. */
+async function fulfil(nowMs: number, fixed: string[]) {
+  let errors = 0;
+  const attempt = async (tx: Transaction, every: number, run: () => Promise<string | undefined>) => {
+    if (!due(tx, every, nowMs)) return;
+    st.checked.set(tx.id, nowMs);
+    try {
+      const done = await run();
+      if (done) fixed.push(`${tx.id} ${done}`);
+    } catch (e) {
+      errors++;
+      console.warn(`[reconcile] ${tx.id}: ${pp.paypalErrorMessage(e)}`);
+    }
+  };
+  for (const tx of txUnshipped(iso(nowMs - SHIP_AFTER_MS), iso(nowMs - ORDER_LOOKBACK_MS), PER_RUN)) {
+    await attempt(tx, PAYOUT_EVERY_MS, async () => ((await shipOrder(tx)).shipment ? "shipped" : undefined));
+  }
+  for (const tx of txPayoutsOpen(PAYOUT_FINAL, PER_RUN * 4)) {
+    await attempt(tx, PAYOUT_EVERY_MS, async () => {
+      const next = await syncPayout(tx);
+      return next.payout?.status !== tx.payout?.status ? `payout ${next.payout?.status}` : undefined;
+    });
+  }
+  return errors;
+}
+
 /** One reconciliation pass. Concurrent calls share the run in progress. */
 export async function reconcileOnce(nowMs = Date.now()): Promise<{ fixed: string[]; errors: number }> {
   if (st.running) return { fixed: [], errors: 0 };
@@ -81,6 +110,7 @@ export async function reconcileOnce(nowMs = Date.now()): Promise<{ fixed: string
     if (pp.isPayPalConfigured()) {
       for (const tx of txStale(["CREATED", "APPROVED"], iso(nowMs - STALE_MS), iso(nowMs - ORDER_LOOKBACK_MS), PER_RUN)) await check(tx, STALE_MS);
       for (const tx of txStale(["SENT", "UNPAID"], iso(nowMs - INVOICE_EVERY_MS), iso(nowMs - INVOICE_LOOKBACK_MS), PER_RUN)) await check(tx, INVOICE_EVERY_MS);
+      errors += await fulfil(nowMs, fixed);
     }
     // After PayPal has been checked, so an interrupted one-tap that did settle is confirmed, not reopened.
     fixed.push(...recoverStuckActions(nowMs).map((id) => `${id} recovered`));
@@ -158,12 +188,17 @@ export async function ordersForAgent(sessionId: string, opts: { actionIds?: bool
         last_event: t.events[t.events.length - 1]?.type,
         paypal_check: checks.get(t.id) ?? (LIVE.includes(t.status) ? "unavailable" : "final"),
         allowed_changes: allowedOps(t),
+        ...(t.shipping ? { ship_to: t.shipping } : {}),
+        ...(t.shipment ? { shipment: { carrier: t.shipment.carrier, tracking_number: t.shipment.trackingNumber, status: t.shipment.status, shipped: t.shipment.shippedAt } } : {}),
+        ...(t.job ? { job: { hours_worked: t.job.hours, hours_estimated: t.job.estimatedHours, unused_labor_refunded_usd: t.job.refunded } } : {}),
+        ...(t.payout ? { technician_payout: { payee: t.payout.payee, amount_usd: t.payout.amount, status: t.payout.status, error: t.payout.error } } : {}),
         paypal: {
           order_id: t.paypal.orderId,
           capture_id: t.paypal.captureId,
           authorization_id: t.paypal.authorizationId,
           refund_id: t.paypal.refundId,
           invoice_id: t.paypal.invoiceId,
+          payout_batch_id: t.payout?.batchId || undefined,
         },
         ...(t.dispute ? { dispute: { status: t.dispute.status, reason: t.dispute.reason, outcome: t.dispute.outcome } } : {}),
       };

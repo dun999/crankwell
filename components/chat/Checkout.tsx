@@ -114,6 +114,8 @@ export function Receipt({ action }: { action: Action }) {
       ["Authorization", tx?.paypal.authorizationId],
       ["Refund", tx?.paypal.refundId],
       ["PayPal invoice", tx?.paypal.invoiceId],
+      ["Tracking", tx?.shipment && `${tx.shipment.trackingNumber}`],
+      ["Payout batch", tx?.payout?.batchId || undefined],
     ] satisfies [string, string | undefined][]
   ).flatMap(([k, v]) => (v ? [[k, v] as const] : []));
   const change = isChange(action.kind) ? CHANGE_COPY[action.kind] : null;
@@ -150,6 +152,12 @@ export function Receipt({ action }: { action: Action }) {
             <div className="col-span-2 min-w-0">
               <dt className="fig">{change ? "PayPal account" : action.kind === "technician_invoice" ? "Sent to" : "Paid by"}</dt>
               <dd className="mt-0.5 truncate text-[12px]">{tx.paypal.payerEmail}</dd>
+            </div>
+          )}
+          {tx?.shipping && !change && (
+            <div className="col-span-2 min-w-0">
+              <dt className="fig">Ships to</dt>
+              <dd className="mt-0.5 text-[12px] leading-snug">{[tx.shipping.name, tx.shipping.address].filter(Boolean).join(" · ")}</dd>
             </div>
           )}
         </dl>

@@ -4,13 +4,16 @@ import { CHANGE_COPY, allowedOps, isChange } from "@/lib/commerce/ops";
 import type { Action, ActionLine, ActionPayload, ChangePayload, Transaction } from "@/lib/commerce/types";
 import {
   CommerceError,
+  TECH_SHARE,
   authorizeOrder,
   cancelInvoice,
   captureDeposit,
   captureOrder,
+  completeJob,
   createDepositOrder,
   createPartsOrder,
   quoteDeposit,
+  quoteJob,
   quoteParts,
   quoteTechnician,
   refund,
@@ -70,6 +73,23 @@ function quoteChange(p: ChangePayload, sessionId: string): Quote {
       return { ...base, title: `Cancel · ${tx.title}`, lines: [{ label: "Deposit on hold", amount }], policy: "Nothing is charged · the hold is voided (Payments v2)" };
     case "cancel_invoice":
       return { ...base, title: `Cancel invoice · ${tx.title}`, lines: [{ label: "Invoice total", amount }], policy: "Nothing is charged · PayPal cancels the invoice and the visit is released" };
+    case "complete_job": {
+      const j = quoteJob(tx, p.hours);
+      const payload = { ...p, hours: j.actual };
+      return {
+        ...base,
+        payload,
+        amount: usd(j.unused),
+        title: `Job done · ${tx.title}`,
+        summary: `${j.actual} h worked of the ${j.estimated} h estimate${p.reason ? ` · ${p.reason}` : ""}`,
+        lines: [
+          { label: `Paid on PayPal invoice ${tx.paypal.invoiceNumber ?? ""}`.trim(), amount },
+          { label: `Unused labor (${j.estimated - j.actual} h × $${j.tech.hourlyRate}) refunded`, amount: usd(j.unused) },
+          { label: `${j.tech.name}'s payout (${Math.round(TECH_SHARE * 100)}%)`, amount: usd(j.payout) },
+        ],
+        policy: j.unused > 0 ? "Partial refund of the invoice payment (Payments v2) · technician paid with PayPal Payouts" : "No refund (the full estimate was used) · technician paid with PayPal Payouts",
+      };
+    }
   }
 }
 
@@ -85,6 +105,8 @@ async function runChange(p: ChangePayload, sessionId: string): Promise<Transacti
       return voidDeposit(p.txId, sessionId);
     case "cancel_invoice":
       return cancelInvoice(p.txId, sessionId);
+    case "complete_job":
+      return completeJob(p.txId, sessionId, p.hours);
   }
 }
 
@@ -262,6 +284,9 @@ export function actionStatus(id: string, sessionId: string) {
         refund_id: tx.paypal.refundId,
         invoice_id: tx.paypal.invoiceId,
         invoice_url: tx.paypal.payerViewUrl,
+        payout_batch_id: tx.payout?.batchId || undefined,
+        payout_status: tx.payout?.status,
+        tracking_number: tx.shipment?.trackingNumber,
       }
     : undefined;
   const message =

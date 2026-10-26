@@ -21,6 +21,7 @@ const OP_BUTTON: Record<ChangeKind, { label: (tx: Transaction) => string; busy: 
   cancel_reservation: { label: () => "Cancel (void hold)", busy: "Releasing…", variant: "secondary", run: (id) => commerce.voidDeposit(id) },
   refund: { label: (tx) => (tx.kind === "shop_deposit" ? "Refund deposit" : "Cancel & refund"), busy: "Refunding…", variant: "danger", run: (id) => commerce.refund(id) },
   cancel_invoice: { label: () => "Cancel invoice", busy: "Cancelling…", variant: "ghost", run: (id) => commerce.cancelInvoice(id) },
+  complete_job: { label: () => "Job done (settle)", busy: "Settling…", variant: "primary", run: (id) => commerce.completeJob(id) },
 };
 
 const words = (s?: string) => (s ? s.toLowerCase().replace(/_/g, " ") : "");
@@ -63,6 +64,15 @@ function TxDetail({ tx }: { tx: Transaction }) {
     ["Refund", tx.paypal.refundId],
     ["Dispute", tx.dispute?.id],
     ["Invoice", tx.paypal.invoiceId && `${tx.paypal.invoiceNumber} · ${tx.paypal.invoiceId}`],
+    ["Tracker", tx.shipment?.trackerId],
+    ["Payout batch", tx.payout?.batchId],
+    ["Payout item", tx.payout?.itemId],
+  ].filter((r): r is [string, string] => Boolean(r[1]));
+  const facts = [
+    ["Ships to", tx.shipping && [tx.shipping.name, tx.shipping.address].filter(Boolean).join(" · ")],
+    ["Shipment", tx.shipment && `${tx.shipment.carrier} · ${tx.shipment.trackingNumber} · ${words(tx.shipment.status)}`],
+    ["Job", tx.job && `${tx.job.hours} h of ${tx.job.estimatedHours} h${Number(tx.job.refunded) > 0 ? ` · ${money(Number(tx.job.refunded))} unused labor refunded` : ""}`],
+    ["Technician payout", tx.payout && `${tx.payout.payee} · ${money(Number(tx.payout.amount))} · ${words(tx.payout.status)}${tx.payout.fee ? ` · fee ${money(Number(tx.payout.fee))}` : ""}${tx.payout.error ? ` · ${tx.payout.error}` : ""}`],
   ].filter((r): r is [string, string] => Boolean(r[1]));
   return (
     <article aria-label={`${tx.title} details`} className="space-y-4">
@@ -105,6 +115,17 @@ function TxDetail({ tx }: { tx: Transaction }) {
         })}
       </div>
       {err && <div className="text-xs text-danger">{err}</div>}
+
+      {!!facts.length && (
+        <dl className="space-y-1.5 rounded-xl bg-surface-2 px-3 py-2.5 text-xs">
+          {facts.map(([k, v]) => (
+            <div key={k}>
+              <dt className="text-[11px] text-muted">{k}</dt>
+              <dd className="leading-snug">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
 
       {!!ids.length && (
         <section>
