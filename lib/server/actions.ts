@@ -17,6 +17,7 @@ import {
   quoteParts,
   quoteTechnician,
   refund,
+  remindInvoice,
   sendTechnicianInvoice,
   voidDeposit,
 } from "./commerce";
@@ -73,6 +74,8 @@ function quoteChange(p: ChangePayload, sessionId: string): Quote {
       return { ...base, title: `Cancel · ${tx.title}`, lines: [{ label: "Deposit on hold", amount }], policy: "Nothing is charged · the hold is voided (Payments v2)" };
     case "cancel_invoice":
       return { ...base, title: `Cancel invoice · ${tx.title}`, lines: [{ label: "Invoice total", amount }], policy: "Nothing is charged · PayPal cancels the invoice and the visit is released" };
+    case "remind_invoice":
+      return { ...base, title: `Remind · ${tx.title}`, lines: [{ label: "Invoice total", amount }], policy: `PayPal emails the invoice again to ${tx.paypal.payerEmail ?? "the buyer"} · nothing is charged` };
     case "complete_job": {
       const j = quoteJob(tx, p.hours);
       const payload = { ...p, hours: j.actual };
@@ -105,6 +108,8 @@ async function runChange(p: ChangePayload, sessionId: string): Promise<Transacti
       return voidDeposit(p.txId, sessionId);
     case "cancel_invoice":
       return cancelInvoice(p.txId, sessionId);
+    case "remind_invoice":
+      return remindInvoice(p.txId, sessionId);
     case "complete_job":
       return completeJob(p.txId, sessionId, p.hours);
   }

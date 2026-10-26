@@ -3,7 +3,7 @@ import type { ActionKind, ChangeKind, Transaction } from "./types";
 // After-sale changes to an order, and when each is possible. One source of truth for the agent's
 // prepare_order_change, the server's checks and the Orders panel's buttons. Safe on the client.
 
-export const CHANGE_KINDS = ["refund", "check_in", "cancel_reservation", "cancel_invoice", "complete_job"] as const satisfies readonly ChangeKind[];
+export const CHANGE_KINDS = ["refund", "check_in", "cancel_reservation", "cancel_invoice", "remind_invoice", "complete_job"] as const satisfies readonly ChangeKind[];
 
 export const isChange = (k: ActionKind): k is ChangeKind => (CHANGE_KINDS as readonly string[]).includes(k);
 
@@ -17,7 +17,7 @@ export function allowedOps(tx: Pick<Transaction, "kind" | "status" | "paypal" | 
       return tx.status === "CAPTURED" && tx.paypal.captureId ? ["refund"] : [];
     case "technician_invoice":
       if (tx.status === "PAID") return tx.job ? [] : ["complete_job"];
-      return (tx.status === "SENT" || tx.status === "UNPAID") && tx.paypal.invoiceId ? ["cancel_invoice"] : [];
+      return (tx.status === "SENT" || tx.status === "UNPAID") && tx.paypal.invoiceId ? ["remind_invoice", "cancel_invoice"] : [];
   }
 }
 
@@ -27,5 +27,6 @@ export const CHANGE_COPY: Record<ChangeKind, { ask: string; button: string; done
   check_in: { ask: "Ready to check in", button: "Check in · capture deposit", done: "Deposit captured", total: "Charged now", status: "Checked in: the held deposit was captured.", tone: "primary" },
   cancel_reservation: { ask: "Cancel this reservation?", button: "Cancel reservation · release hold", done: "Hold released", total: "Released", status: "Reservation cancelled: the hold was released, nothing was charged.", tone: "danger" },
   cancel_invoice: { ask: "Cancel this invoice?", button: "Cancel PayPal invoice", done: "Invoice cancelled", total: "Not charged", status: "The PayPal invoice was cancelled and the visit released.", tone: "danger" },
+  remind_invoice: { ask: "Send the invoice again?", button: "Send PayPal reminder", done: "Reminder sent", total: "Still due", status: "PayPal emailed the invoice again.", tone: "primary" },
   complete_job: { ask: "Mark the job done?", button: "Job done · settle with PayPal", done: "Job settled", total: "Back to you", status: "Job done: unused labor refunded to the buyer and the technician paid with PayPal Payouts.", tone: "primary" },
 };

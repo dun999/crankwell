@@ -21,6 +21,7 @@ const OP_BUTTON: Record<ChangeKind, { label: (tx: Transaction) => string; busy: 
   cancel_reservation: { label: () => "Cancel (void hold)", busy: "Releasing…", variant: "secondary", run: (id) => commerce.voidDeposit(id) },
   refund: { label: (tx) => (tx.kind === "shop_deposit" ? "Refund deposit" : "Cancel & refund"), busy: "Refunding…", variant: "danger", run: (id) => commerce.refund(id) },
   cancel_invoice: { label: () => "Cancel invoice", busy: "Cancelling…", variant: "ghost", run: (id) => commerce.cancelInvoice(id) },
+  remind_invoice: { label: () => "Email it again", busy: "Sending…", variant: "secondary", run: (id) => commerce.remindInvoice(id) },
   complete_job: { label: () => "Job done (settle)", busy: "Settling…", variant: "primary", run: (id) => commerce.completeJob(id) },
 };
 

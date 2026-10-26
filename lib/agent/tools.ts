@@ -23,6 +23,12 @@ export const OrderChangeS = z.object({
   actual_hours: z.number().min(0.5).max(12).optional().describe("complete_job only: hours the technician actually worked, if the user said (defaults to the estimate)"),
 });
 
+/** Ask PayPal itself about one of the user's orders (PayPal Agent Toolkit, scoped to the order). */
+export const PayPalLookupS = z.object({
+  order_ref: z.string().max(60).describe("The order_ref from get_orders"),
+  about: z.enum(["payment", "tracking", "dispute"]).describe("payment: PayPal's own record of the order or invoice; tracking: shipment trackers on a parts order; dispute: buyer disputes on the payment"),
+});
+
 export const SPECIALTIES = ["brakes", "engine", "transmission", "electrical", "suspension", "cooling", "exhaust", "tires", "body", "general"] as const;
 
 /** A purchase the user asked for. Flat on purpose: models fill flat schemas more reliably than unions. */
@@ -116,6 +122,7 @@ const schemas = {
   }),
   prepare_action: PrepareActionS,
   get_orders: z.object({}),
+  paypal_lookup: PayPalLookupS,
   prepare_order_change: OrderChangeS,
 } as const;
 
@@ -144,8 +151,10 @@ const DESCRIPTIONS: Record<ToolName, string> = {
     "Prepare a purchase the user asked for: buy a part, reserve a repair shop (refundable deposit hold) or book a mobile technician (PayPal invoice). The server prices it and shows a confirm card. Nothing is charged until the user taps Confirm (one tap with saved PayPal, otherwise PayPal approval). Call it only when the user asks you to buy, book or reserve, or accepts your suggestion. Use exact ids from the lookup tools.",
   get_orders:
     "Get the user's PayPal orders, shop reservations and technician invoices, with open ones checked live against PayPal (paypal_check), what can be changed on each (allowed_changes), plus anything still waiting for their confirmation.",
+  paypal_lookup:
+    "Read one of the user's orders straight from PayPal with the PayPal Agent Toolkit: the payment record (captures, holds, refunds, invoice payments), shipment tracking, or buyer disputes. Use it when the user asks to double-check with PayPal, where their part is, or about a dispute. Use an order_ref from get_orders.",
   prepare_order_change:
-    "Prepare a change to an order the user already has: refund a part or captured deposit, check in at a shop (capture the held deposit), cancel a reservation (release the hold), cancel an unpaid technician invoice, or complete_job when a paid technician visit is finished (refunds unused labor, pays the technician). Call get_orders first and use its order_ref and one of allowed_changes. Shows a confirm card; nothing changes until the user taps it. Call it only when the user asks for that change.",
+    "Prepare a change to an order the user already has: refund a part or captured deposit, check in at a shop (capture the held deposit), cancel a reservation (release the hold), cancel or re-send (remind_invoice) an unpaid technician invoice, or complete_job when a paid technician visit is finished (refunds unused labor, pays the technician). Call get_orders first and use its order_ref and one of allowed_changes. Shows a confirm card; nothing changes until the user taps it. Call it only when the user asks for that change.",
 };
 
 /** What the user sees while a tool runs. */
@@ -162,6 +171,7 @@ export const TOOL_LABELS: Record<ToolName, string> = {
   suggest_replies: "Wrapping up",
   prepare_action: "Preparing your PayPal sandbox checkout",
   get_orders: "Checking your PayPal orders",
+  paypal_lookup: "Asking PayPal",
   prepare_order_change: "Preparing the change to your order",
 };
 
@@ -290,6 +300,14 @@ export function actionPayload(a: z.infer<typeof PrepareActionS>, location?: { la
   return { kind: "technician_invoice", carId: a.car_id, partId: a.part_id, technicianId: tech.id, when: a.when ?? "As soon as possible", hours: a.hours ?? 1, issue: a.issue };
 }
 
+/** One order of this session, read from PayPal through the Agent Toolkit (loaded on first use). */
+export async function paypalLookup(a: z.infer<typeof PayPalLookupS>, sessionId: string) {
+  const tk = await import("@/lib/server/paypal-toolkit");
+  const tx = tk.ownOrder(a.order_ref, sessionId);
+  const read = a.about === "payment" ? tk.paypalPayment : a.about === "tracking" ? tk.paypalTracking : tk.paypalDisputes;
+  return { order_ref: tx.id, title: tx.title, ...(await read(tx)) };
+}
+
 async function exec(name: ToolName, input: unknown, ctx: ToolContext): Promise<unknown> {
   const loc = ctx.view.location ?? DEFAULT_LOCATION;
   switch (name) {
@@ -388,6 +406,8 @@ async function exec(name: ToolName, input: unknown, ctx: ToolContext): Promise<u
       schemas.get_orders.parse(input ?? {});
       return ordersForAgent(ctx.sessionId);
     }
+    case "paypal_lookup":
+      return paypalLookup(schemas.paypal_lookup.parse(input), ctx.sessionId);
     case "prepare_order_change": {
       const a = schemas.prepare_order_change.parse(input);
       const action = prepareAction(ctx.sessionId, { kind: a.change, txId: a.order_ref, reason: a.reason, hours: a.actual_hours }, { source: "app" });

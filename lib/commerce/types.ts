@@ -159,7 +159,7 @@ export interface Technician {
 // ───────────────────────── Agent-prepared actions ─────────────────────────
 
 /** An after-sale change to one of the user's orders (see lib/commerce/ops.ts for when each applies). */
-export type ChangeKind = "refund" | "check_in" | "cancel_reservation" | "cancel_invoice" | "complete_job";
+export type ChangeKind = "refund" | "check_in" | "cancel_reservation" | "cancel_invoice" | "remind_invoice" | "complete_job";
 export type ActionKind = TxKind | ChangeKind;
 
 /** What the agent proposes. The server prices it from the catalog; only the user can confirm it. */

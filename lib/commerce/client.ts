@@ -36,6 +36,7 @@ export const commerce = {
     post<{ tx: Transaction }>("/api/paypal/invoices", input).then(track),
   refreshInvoice: (txId: string) => post<{ tx: Transaction }>(`/api/paypal/invoices/${txId}`, { action: "refresh" }).then(track),
   cancelInvoice: (txId: string) => post<{ tx: Transaction }>(`/api/paypal/invoices/${txId}`, { action: "cancel" }).then(track),
+  remindInvoice: (txId: string) => post<{ tx: Transaction }>(`/api/paypal/invoices/${txId}`, { action: "remind" }).then(track),
   completeJob: (txId: string, hours?: number) => post<{ tx: Transaction }>(`/api/paypal/invoices/${txId}`, { action: "complete", hours }).then(track),
 };
 

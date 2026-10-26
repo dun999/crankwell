@@ -3,7 +3,8 @@ import type { NextConfig } from "next";
 const noindex = [{ key: "X-Robots-Tag", value: "noindex, nofollow, noarchive, nosnippet, noimageindex" }];
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["better-sqlite3"],
+  // The PayPal Agent Toolkit pins its own openai@4 and zod@3; keep it out of the bundle.
+  serverExternalPackages: ["better-sqlite3", "@paypal/agent-toolkit"],
   // OAuth discovery for the MCP connector lives under /api/oauth.
   async rewrites() {
     return [

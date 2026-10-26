@@ -63,7 +63,7 @@ describe("allowedOps", () => {
     expect(allowedOps(tx("shop_deposit", "AUTHORIZED"))).toEqual(["check_in", "cancel_reservation"]);
     expect(allowedOps(tx("shop_deposit", "CAPTURED"))).toEqual(["refund"]);
     expect(allowedOps(tx("shop_deposit", "VOIDED"))).toEqual([]);
-    expect(allowedOps(tx("technician_invoice", "SENT"))).toEqual(["cancel_invoice"]);
+    expect(allowedOps(tx("technician_invoice", "SENT"))).toEqual(["remind_invoice", "cancel_invoice"]);
     expect(allowedOps(tx("technician_invoice", "PAID"))).toEqual(["complete_job"]);
     expect(allowedOps({ ...tx("technician_invoice", "PAID"), job: { completedAt: "", hours: 1, estimatedHours: 1, refunded: "0.00" } })).toEqual([]);
     expect(allowedOps(tx("parts", "COMPLETED", {}))).toEqual([]);

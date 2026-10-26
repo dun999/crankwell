@@ -8,6 +8,7 @@ import {
   CarIdS,
   DiagnosisSuspectS,
   OrderChangeS,
+  PayPalLookupS,
   PrepareActionS,
   RecommendedOptionS,
   SPECIALTIES,
@@ -15,6 +16,7 @@ import {
   actionPayload,
   buildRecommendations,
   partBrief,
+  paypalLookup,
   requirePart,
   shopBrief,
   skuBrief,
@@ -36,7 +38,7 @@ import { mcpRequest } from "./context";
 
 export const CARD_URI = "ui://crankwell/card";
 /** Tools that act for a paired browser. Calling one before pairing returns 401, which makes Claude show Connect. */
-export const PROTECTED_TOOLS = new Set(["prepare_purchase", "prepare_order_change", "get_purchase_status", "get_orders", "confirm_purchase"]);
+export const PROTECTED_TOOLS = new Set(["prepare_purchase", "prepare_order_change", "get_purchase_status", "get_orders", "paypal_lookup", "confirm_purchase"]);
 const CONFIRM_KEY_META = "crankwell/confirmKey";
 
 export const MCP_INSTRUCTIONS = `Crankwell is an AI mechanic with PayPal checkout. Use it when someone describes a car problem or wants a part, a mobile mechanic or a repair-shop booking.
@@ -47,7 +49,8 @@ Workflow:
 3. If it's ambiguous, ask for one or two safe checks in chat (follow the safety rules), then call show_diagnosis again.
 4. Look up real options first (search_spare_parts, find_technicians, find_repair_shops), then show_options with 2-4 options from safest to least safe: diy only when genuinely beginner-safe, buy_part, book_technician (comes to the car; best when it shouldn't be driven), reserve_shop, tow.
 5. When the user asks to buy, book or reserve, call prepare_purchase. It shows a PayPal checkout card. You cannot pay: the user confirms with one tap (saved PayPal) or approves in PayPal. Never say something is paid, booked or reserved until get_purchase_status says so.
-6. After a purchase, when the user wants a refund, to check in at the shop, to cancel a reservation, to cancel an unpaid invoice or to mark a technician's job done: get_orders, then prepare_order_change with that order's order_ref and one of its allowed_changes. It shows a confirm card; nothing changes until the user taps it.
+6. After a purchase, when the user wants a refund, to check in at the shop, to cancel a reservation, to cancel or re-send an unpaid invoice or to mark a technician's job done: get_orders, then prepare_order_change with that order's order_ref and one of its allowed_changes. It shows a confirm card; nothing changes until the user taps it.
+7. To double-check a payment, find a shipment or check a dispute, paypal_lookup reads that one order straight from PayPal (PayPal Agent Toolkit).
 The first prepare_purchase asks the user to connect Crankwell once (it links Claude to their Crankwell browser, where orders appear).
 
 Safety rules:
@@ -389,6 +392,18 @@ export function registerCrankwell(server: McpServer) {
     },
     () =>
       guard(async () => data(await ordersForAgent(session(), { actionIds: true }))),
+  );
+
+  server.registerTool(
+    "paypal_lookup",
+    {
+      title: "Ask PayPal about an order",
+      description:
+        "Read one of the user's orders straight from PayPal with the PayPal Agent Toolkit: about=payment (captures, holds, refunds, invoice payments), tracking (shipment trackers on a parts order) or dispute (buyer disputes). Use an order_ref from get_orders.",
+      inputSchema: PayPalLookupS,
+      annotations: { title: "Ask PayPal about an order", ...lookup, openWorldHint: true },
+    },
+    (a) => guard(async () => data(await paypalLookup(a, session()))),
   );
 
   // The card's Pay button. Hidden from the model (visibility: app) and gated by a key only the card gets.

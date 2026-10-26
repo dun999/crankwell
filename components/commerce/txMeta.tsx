@@ -1,4 +1,4 @@
-import { BadgeCheck, CalendarCheck, CalendarX2, FileX2, type LucideIcon, Package, RotateCcw, Wrench } from "lucide-react";
+import { BadgeCheck, CalendarCheck, CalendarX2, FileX2, type LucideIcon, MailCheck, Package, RotateCcw, Wrench } from "lucide-react";
 import type { ActionKind, TxStatus } from "@/lib/commerce/types";
 
 const STATUS: Record<TxStatus, { label: string; tone: "ok" | "warn" | "muted" | "danger" | "accent" }> = {
@@ -43,5 +43,6 @@ export const ACTION_ICON: Record<ActionKind, LucideIcon> = {
   check_in: CalendarCheck,
   cancel_reservation: CalendarX2,
   cancel_invoice: FileX2,
+  remind_invoice: MailCheck,
   complete_job: BadgeCheck,
 };

@@ -416,6 +416,15 @@ export async function cancelInvoice(txId: string, sessionId: string) {
   return save(tx.id, { status: "CANCELLED" }, { source: "paypal-api", type: "Invoice cancelled" });
 }
 
+/** Have PayPal email an unpaid invoice again (PayPal Agent Toolkit · send_invoice_reminder). */
+export async function remindInvoice(txId: string, sessionId: string) {
+  const tx = owned(txId, sessionId);
+  if (!["SENT", "UNPAID"].includes(tx.status)) throw new CommerceError(`This invoice is ${tx.status.toLowerCase()}, so there's nothing to remind about`, 409);
+  const { sendInvoiceReminder } = await import("./paypal-toolkit");
+  await sendInvoiceReminder(tx);
+  return save(tx.id, {}, { source: "paypal-api", type: "Invoice reminder sent", note: "PayPal Agent Toolkit · send_invoice_reminder" });
+}
+
 /** The technician's share of what a job earned; the rest is Crankwell's fee. */
 export const TECH_SHARE = 0.85;
 
