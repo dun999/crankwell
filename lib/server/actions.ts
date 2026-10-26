@@ -259,9 +259,9 @@ export async function confirmAction(id: string, sessionId: string, opts: { origi
  * Start PayPal approval for an action (no saved wallet yet, or over the one-tap limit).
  * `save` stores the buyer's PayPal in the Vault on success, which turns on one-tap.
  */
-export async function startApproval(id: string, opts: { origin: string; save: boolean; sessionId?: string; returnTo: "pay" | "popup" }) {
+export async function startApproval(id: string, opts: { origin: string; save: boolean; returnTo: "pay" | "popup" }) {
   const loaded = load(id);
-  if (!loaded || (opts.sessionId && loaded.sessionId !== opts.sessionId)) throw new CommerceError("Action not found", 404);
+  if (!loaded) throw new CommerceError("Action not found", 404);
   const { action: a, sessionId } = loaded;
   if (a.status === "confirmed") throw new CommerceError("Already paid", 409);
   if (a.status !== "pending") throw new CommerceError(a.status === "expired" ? "This offer expired. Ask the mechanic to prepare it again." : "This action is no longer open", 410);

@@ -12,15 +12,16 @@ import {
   PaypalPaymentTokenUsageType,
   PaypalWalletContextShippingPreference,
   StoreInVaultInstruction,
+  VaultController,
   type Order,
   type OrderRequest,
   type PaypalWallet,
 } from "@paypal/paypal-server-sdk";
 
 // PayPal integration (sandbox by default).
-//  - Orders v2 + Payments v2 go through the official Server SDK.
-//  - Invoicing v2, Vault token deletion and webhook signature verification
-//    use the REST API directly with the same OAuth credentials.
+//  - Orders v2, Payments v2 and Vault v3 go through the official Server SDK.
+//  - Invoicing v2, Payouts and webhook signature verification aren't in the SDK, so they use the
+//    REST API directly with the same OAuth credentials.
 
 export class PayPalNotConfigured extends Error {
   constructor() {
@@ -32,7 +33,10 @@ export const paypalEnv = () => ((process.env.PAYPAL_ENV ?? "sandbox") === "live"
 export const paypalApiBase = () => (paypalEnv() === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com");
 export const isPayPalConfigured = () => Boolean(process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET);
 
-const g = globalThis as unknown as { __pp?: { client: Client; orders: OrdersController; payments: PaymentsController }; __ppToken?: { token: string; exp: number } };
+const g = globalThis as unknown as {
+  __pp?: { client: Client; orders: OrdersController; payments: PaymentsController; vault: VaultController };
+  __ppToken?: { token: string; exp: number };
+};
 
 function sdk() {
   if (!isPayPalConfigured()) throw new PayPalNotConfigured();
@@ -45,7 +49,7 @@ function sdk() {
       environment: paypalEnv() === "live" ? Environment.Production : Environment.Sandbox,
       timeout: 30_000,
     });
-    g.__pp = { client, orders: new OrdersController(client), payments: new PaymentsController(client) };
+    g.__pp = { client, orders: new OrdersController(client), payments: new PaymentsController(client), vault: new VaultController(client) };
   }
   return g.__pp;
 }
@@ -87,6 +91,16 @@ async function accessToken(): Promise<string> {
   if (!r.ok) throw new RestError(r.status, body);
   g.__ppToken = { token: body.access_token, exp: Date.now() + body.expires_in * 1000 };
   return body.access_token;
+}
+
+/** Can we get a PayPal OAuth token right now? (For /api/health; the token is cached.) */
+export async function paypalReachable(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await accessToken();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: paypalErrorMessage(e) };
+  }
 }
 
 export async function paypalRest<T>(path: string, init: { method?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<T> {
@@ -163,7 +177,7 @@ export async function createOrder(input: {
         referenceId: input.referenceId,
         customId: input.referenceId,
         description: input.description.slice(0, 127),
-        softDescriptor: "FIXYOURCAR",
+        softDescriptor: "CRANKWELL",
         amount: {
           ...usd(itemTotal + input.shipping),
           breakdown: { itemTotal: usd(itemTotal), shipping: usd(input.shipping) },
@@ -220,9 +234,13 @@ export async function authorizeOrder(orderId: string, requestId: string) {
 
 // ───────────────────────── Vault v3 (REST) ─────────────────────────
 
-/** Remove a saved PayPal wallet (payment token). */
+/** Remove a saved PayPal wallet (payment token). A token that's already gone counts as removed. */
 export async function deletePaymentToken(id: string) {
-  await paypalRest(`/v3/vault/payment-tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
+  try {
+    await sdk().vault.deletePaymentToken(id);
+  } catch (e) {
+    if (!(e instanceof ApiError && e.statusCode === 404)) throw e;
+  }
 }
 
 // ───────────────────────── Payments v2 ─────────────────────────
@@ -281,7 +299,8 @@ export async function createAndSendInvoice(input: { reference: string; email: st
         currency_code: "USD",
         note: input.note.slice(0, 4000),
         memo: input.memo.slice(0, 500),
-        terms_and_conditions: "Mobile technician visit booked through Crankwell. Final labor is billed at the posted hourly rate; unused estimate is refunded.",
+        terms_and_conditions:
+          "Mobile technician visit booked through Crankwell. Labor is billed at the posted hourly rate. If the job takes less time than estimated, the unused labor is refunded to your PayPal when you mark the job done.",
         payment_term: { term_type: "DUE_ON_RECEIPT" },
       },
       invoicer: { business_name: "Crankwell Mobile Service" },

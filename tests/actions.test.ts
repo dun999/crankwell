@@ -145,9 +145,10 @@ describe("confirm", () => {
 });
 
 describe("buy from a parts card", () => {
-  const buy = async (body: Record<string, unknown>) => {
+  const buy = async ({ sessionId, ...body }: { sessionId: string } & Record<string, unknown>) => {
     const { POST } = await import("@/app/api/actions/route");
-    return POST(new Request("https://crankwell.test/api/actions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+    const headers = { "content-type": "application/json", cookie: `cw_sid=${sessionId}`, origin: "https://crankwell.test" };
+    return POST(new Request("https://crankwell.test/api/actions", { method: "POST", headers, body: JSON.stringify(body) }));
   };
 
   it("prices the SKU on the server for the part on the card", async () => {

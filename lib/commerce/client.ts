@@ -1,14 +1,11 @@
 "use client";
 import type { Action, Transaction, WalletInfo } from "./types";
-import { getSessionId } from "@/lib/session";
+import { sessionReady } from "@/lib/session";
 import { useOrders } from "@/lib/store/orders";
 
 async function post<T>(url: string, body: Record<string, unknown> = {}): Promise<T> {
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...body, sessionId: getSessionId() }),
-  });
+  await sessionReady();
+  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error ?? `Request failed (${r.status})`);
   return data as T;
@@ -51,7 +48,8 @@ export interface ActionStatus {
 /** Actions the mechanic prepared: confirm with one tap, or approve in the PayPal popup. */
 export const actions = {
   status: async (id: string): Promise<ActionStatus> => {
-    const r = await fetch(`/api/actions/${id}?session=${encodeURIComponent(getSessionId())}`);
+    await sessionReady();
+    const r = await fetch(`/api/actions/${id}`);
     const data = await r.json();
     if (!r.ok) throw new Error(data.error ?? "Couldn't load this checkout");
     return data;
@@ -75,7 +73,7 @@ export const actions = {
     return r;
   },
   cancel: async (id: string) => {
-    const r = await fetch(`/api/actions/${id}`, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: getSessionId() }) });
+    const r = await fetch(`/api/actions/${id}`, { method: "DELETE" });
     return ((await r.json()) as { action: Action }).action;
   },
 };

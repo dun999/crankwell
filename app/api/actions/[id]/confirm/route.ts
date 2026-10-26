@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { confirmAction } from "@/lib/server/actions";
-import { Session, handle, json, originOf } from "@/lib/server/http";
+import { handle, json, originOf, requireSession } from "@/lib/server/http";
 import { rateLimit } from "@/lib/server/ratelimit";
 
 export const runtime = "nodejs";
@@ -10,8 +10,9 @@ export async function POST(req: Request, ctx: RouteContext<"/api/actions/[id]/co
   const limited = rateLimit(req, "confirm", 10);
   if (limited) return limited;
   return handle(async () => {
+    const session = requireSession(req);
     const { id } = await ctx.params;
-    const b = z.object({ sessionId: Session, email: z.string().email().max(200).optional() }).parse(await req.json());
-    return json(await confirmAction(id, b.sessionId, { origin: originOf(req), email: b.email }));
+    const b = z.object({ email: z.string().email().max(200).optional() }).parse(await req.json());
+    return json(await confirmAction(id, session, { origin: originOf(req), email: b.email }));
   });
 }

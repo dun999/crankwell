@@ -17,6 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { createElement, useEffect, useState } from "react";
+import type { TraceSummary } from "@/lib/agent/events";
 import type { Block } from "@/lib/store/chat";
 
 type Tool = Extract<Block, { kind: "tool" }>;
@@ -87,10 +88,12 @@ export function AgentWorking({ blocks, startedAt }: { blocks: Block[]; startedAt
   );
 }
 
-/** After the turn: one quiet line that opens the agent trace (tools, timings). */
-export function StepsSummary({ blocks, ms }: { blocks: Block[]; ms?: number }) {
+const kTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n));
+
+/** After the turn: one quiet line that opens the agent trace (model, tools, timings, tokens). */
+export function StepsSummary({ blocks, ms, trace }: { blocks: Block[]; ms?: number; trace?: TraceSummary }) {
   const list = tools(blocks).filter((t) => t.name !== "suggest_replies");
-  if (!list.length) return null;
+  if (!list.length && !trace?.failover && !trace?.offline) return null;
   return (
     <details className="group">
       <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-md py-0.5 text-[11px] text-faint transition-colors hover:text-muted [&::-webkit-details-marker]:hidden">
@@ -98,6 +101,14 @@ export function StepsSummary({ blocks, ms }: { blocks: Block[]; ms?: number }) {
         {ms ? `Worked for ${secs(ms)}` : "Done"} · {list.length} step{list.length === 1 ? "" : "s"}
         <ChevronRight size={12} className="transition-transform group-open:rotate-90" />
       </summary>
+      {trace && (
+        <p className="mono mt-1.5 text-[10.5px] text-faint">
+          {trace.offline ? "AI offline · keyword match" : `${trace.model} · ${trace.provider}${trace.failover ? " (fallback)" : ""}`}
+          {trace.tokens > 0 && ` · ${kTokens(trace.tokens)} tokens`}
+          {trace.llmCalls > 1 && ` · ${trace.llmCalls} model calls`}
+          {trace.toolErrors > 0 && ` · ${trace.toolErrors} tool retr${trace.toolErrors === 1 ? "y" : "ies"}`}
+        </p>
+      )}
       <ol className="mono mt-1.5 space-y-0.5 border-l border-line-strong pl-2.5 text-[10.5px] text-faint">
         {list.map((t) => (
           <li key={t.id} className="flex items-center gap-1.5" title={t.label}>

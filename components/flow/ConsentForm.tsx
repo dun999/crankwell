@@ -1,7 +1,7 @@
 "use client";
 import { Check, Loader2, ShieldCheck } from "lucide-react";
 import { useState } from "react";
-import { getSessionId } from "@/lib/session";
+import { sessionReady } from "@/lib/session";
 import { Button } from "../ui";
 
 const CAN = [
@@ -19,10 +19,11 @@ export function ConsentForm({ params, app, redirectHost }: { params: Record<stri
     setBusy(allow ? "allow" : "deny");
     setError(null);
     try {
+      await sessionReady();
       const r = await fetch("/api/oauth/authorize", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ params, sessionId: getSessionId(), allow }),
+        body: JSON.stringify({ params, allow }),
       });
       const body = await r.json();
       if (!r.ok || !body.redirect) throw new Error(body.error ?? "Couldn't finish connecting");

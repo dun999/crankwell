@@ -1,13 +1,13 @@
 import { subscribeTx } from "@/lib/server/bus";
-import { Session } from "@/lib/server/http";
+import { sessionFrom } from "@/lib/server/http";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** Server-Sent Events: live transaction updates (webhooks, captures) for one session. */
+/** Server-Sent Events: live transaction updates (webhooks, captures) for this browser's session. */
 export async function GET(req: Request) {
-  const parsed = Session.safeParse(new URL(req.url).searchParams.get("session"));
-  if (!parsed.success) return new Response("bad session", { status: 400 });
+  const session = sessionFrom(req);
+  if (!session) return new Response("no session", { status: 401 });
   const enc = new TextEncoder();
   let cleanup = () => {};
   const stream = new ReadableStream({
@@ -20,7 +20,7 @@ export async function GET(req: Request) {
         }
       };
       send(": connected\n\n");
-      const unsub = subscribeTx(parsed.data, (tx) => send(`event: tx\ndata: ${JSON.stringify(tx)}\n\n`));
+      const unsub = subscribeTx(session, (tx) => send(`event: tx\ndata: ${JSON.stringify(tx)}\n\n`));
       const ping = setInterval(() => send(": ping\n\n"), 20_000);
       cleanup = () => {
         clearInterval(ping);

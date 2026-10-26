@@ -95,9 +95,9 @@ export function TechnicianBook({
   const [tx, setTx] = useState<Transaction | null>(null);
   const live = useOrders((s) => (tx ? s.items.find((x) => x.id === tx.id) : undefined)) ?? tx;
   useEffect(() => {
-    fetch("/api/config")
+    fetch("/api/wallet")
       .then((r) => r.json())
-      .then((c) => c.invoiceRecipient && setEmail((e) => e || c.invoiceRecipient))
+      .then((w) => w.invoiceEmail && setEmail((e) => e || w.invoiceEmail))
       .catch(() => {});
   }, []);
   const hours = estimate ? Math.max(1, Math.round((estimate.max - tech.calloutFee) / tech.hourlyRate / 2)) : 1;

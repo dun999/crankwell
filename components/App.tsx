@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { ViewTransition, useCallback, useEffect, useState } from "react";
 import { CAR_SPECS, getPart, partCode } from "@/lib/cars";
 import { SYSTEM_META } from "@/lib/cars/types";
-import { getSessionId } from "@/lib/session";
+import { sessionReady } from "@/lib/session";
 import { useOrders } from "@/lib/store/orders";
 import { useChat } from "@/lib/store/chat";
 import { useScene } from "@/lib/store/scene";
@@ -119,7 +119,8 @@ export function App() {
       void useChat.getState().send(q);
       return;
     }
-    fetch(`/api/cases/${encodeURIComponent(id!)}?session=${encodeURIComponent(getSessionId())}`)
+    sessionReady()
+      .then(() => fetch(`/api/cases/${encodeURIComponent(id!)}`))
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error())))
       .then((d) => useChat.getState().openCase(d.case, d.actions ?? []))
       .catch(() => useChat.setState((s) => ({ open: true, messages: [...s.messages, { id: `case-${id}`, role: "assistant", blocks: [{ kind: "error", text: "That diagnosis link isn't valid anymore. Describe the problem here and I'll take another look." }] }] })));

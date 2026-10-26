@@ -3,7 +3,7 @@ import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { Action, WalletInfo } from "@/lib/commerce/types";
-import { getSessionId } from "@/lib/session";
+import { sessionReady } from "@/lib/session";
 import { Button } from "../ui";
 
 interface Status {
@@ -14,6 +14,7 @@ interface Status {
 }
 
 async function post<T>(url: string, body: unknown): Promise<T> {
+  await sessionReady();
   const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error ?? `Request failed (${r.status})`);
@@ -33,7 +34,8 @@ export function PayPanel({ initial, notice }: { initial: Action; notice?: { kind
 
   useEffect(() => {
     const ctrl = new AbortController();
-    fetch(`/api/actions/${initial.id}?session=${encodeURIComponent(getSessionId())}`, { signal: ctrl.signal })
+    sessionReady()
+      .then(() => fetch(`/api/actions/${initial.id}`, { signal: ctrl.signal }))
       .then((r) => r.json())
       .then((d: Status) => {
         if (!d.action) return;
@@ -82,7 +84,6 @@ export function PayPanel({ initial, notice }: { initial: Action; notice?: { kind
   }
 
   const oneTap = s.mine && a.kind !== "technician_invoice" && s.wallet && !s.oneTapBlocker;
-  const sid = s.mine ? getSessionId() : undefined;
 
   return (
     <div className="mt-5 space-y-3">
@@ -94,7 +95,7 @@ export function PayPanel({ initial, notice }: { initial: Action; notice?: { kind
               <span className="mb-1 block text-xs text-muted">Send the PayPal invoice to</span>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className="w-full rounded-xl border border-line bg-surface-solid px-3 py-2 text-sm" />
             </label>
-            <Button variant="primary" className="w-full" disabled={!!busy || !/\S+@\S+\.\S+/.test(email)} onClick={() => run("confirm", async () => setS({ ...s, ...(await post<Status>(`/api/actions/${a.id}/confirm`, { sessionId: sid, email })) }))}>
+            <Button variant="primary" className="w-full" disabled={!!busy || !/\S+@\S+\.\S+/.test(email)} onClick={() => run("confirm", async () => setS({ ...s, ...(await post<Status>(`/api/actions/${a.id}/confirm`, { email })) }))}>
               {busy === "confirm" && <Loader2 size={14} className="animate-spin" />} Book & send PayPal invoice
             </Button>
           </>
@@ -104,7 +105,7 @@ export function PayPanel({ initial, notice }: { initial: Action; notice?: { kind
       ) : (
         <>
           {oneTap && (
-            <Button variant="primary" className="h-12 w-full text-[15px]" disabled={!!busy} onClick={() => run("tap", async () => setS({ ...s, ...(await post<Status>(`/api/actions/${a.id}/confirm`, { sessionId: sid })) }))}>
+            <Button variant="primary" className="h-12 w-full text-[15px]" disabled={!!busy} onClick={() => run("tap", async () => setS({ ...s, ...(await post<Status>(`/api/actions/${a.id}/confirm`, {})) }))}>
               {busy === "tap" && <Loader2 size={15} className="animate-spin" />} Pay ${Number(a.amount).toFixed(2)} · one tap
             </Button>
           )}
@@ -115,7 +116,7 @@ export function PayPanel({ initial, notice }: { initial: Action; notice?: { kind
             disabled={!!busy}
             onClick={() =>
               run("paypal", async () => {
-                const r = await post<{ approveUrl?: string }>(`/api/actions/${a.id}/approve`, { sessionId: sid, save, returnTo: "pay" });
+                const r = await post<{ approveUrl?: string }>(`/api/actions/${a.id}/approve`, { save, returnTo: "pay" });
                 if (!r.approveUrl) throw new Error("PayPal didn't return an approval link");
                 window.location.assign(r.approveUrl);
               })

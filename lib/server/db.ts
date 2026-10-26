@@ -94,6 +94,26 @@ export function db(): DB {
       name TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS session_adoptions (
+      legacy_id TEXT PRIMARY KEY,
+      adopted_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS llm_usage (
+      day TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      prompt_tokens INTEGER NOT NULL DEFAULT 0,
+      completion_tokens INTEGER NOT NULL DEFAULT 0,
+      calls INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (day, provider)
+    );
+    CREATE TABLE IF NOT EXISTS agent_turns (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      data TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS agent_turns_conv ON agent_turns(conversation_id);
   `);
   g.__fycDb = d;
   return d;
@@ -196,6 +216,12 @@ export function txUpdate(
 }
 
 // ───────────────────────── Webhooks ─────────────────────────
+
+/** When the last PayPal webhook arrived, if ever. */
+export function lastWebhookAt(): string | null {
+  const r = db().prepare("SELECT MAX(received_at) AS at FROM webhook_events").get() as { at: string | null };
+  return r.at;
+}
 
 /** Record a webhook event id. Returns false if it was already processed. */
 export function webhookFirstSeen(id: string, type: string, resourceId: string | undefined, payload: unknown): boolean {

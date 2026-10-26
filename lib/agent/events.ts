@@ -85,7 +85,18 @@ export type StreamEvent =
   | { event: "tool"; data: { id: string; name: string; label: string; status: "running" | "done" | "error" } }
   | { event: "ui"; data: UiEvent }
   | { event: "error"; data: { message: string } }
-  | { event: "done"; data: { stopReason: string | null } };
+  | { event: "done"; data: { stopReason: string | null; trace?: TraceSummary } };
+
+/** How the turn ran, for the agent trace under the reply. */
+export interface TraceSummary {
+  provider: string;
+  model: string;
+  failover: boolean;
+  offline?: boolean;
+  llmCalls: number;
+  tokens: number;
+  toolErrors: number;
+}
 
 export function encodeSse(e: StreamEvent): string {
   return `event: ${e.event}\ndata: ${JSON.stringify(e.data)}\n\n`;

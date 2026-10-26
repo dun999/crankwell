@@ -1,7 +1,7 @@
 "use client";
 import { create } from "zustand";
 import type { Transaction, WalletInfo } from "@/lib/commerce/types";
-import { getSessionId } from "@/lib/session";
+import { sessionReady } from "@/lib/session";
 
 interface OrdersState {
   items: Transaction[];
@@ -38,11 +38,12 @@ export const useOrders = create<OrdersState>((set, get) => ({
   wallet: null,
   connections: [],
   refreshWallet: async () => {
-    const r = await fetch(`/api/wallet?session=${encodeURIComponent(getSessionId())}`);
+    await sessionReady();
+    const r = await fetch("/api/wallet");
     if (r.ok) set(await r.json());
   },
   forget: async (what) => {
-    const r = await fetch("/api/wallet", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: getSessionId(), what }) });
+    const r = await fetch("/api/wallet", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ what }) });
     if (r.ok) set(await r.json());
   },
   setOpen: (open) => set({ open }),
@@ -57,20 +58,29 @@ export const useOrders = create<OrdersState>((set, get) => ({
       };
     }),
   refresh: async () => {
-    const r = await fetch(`/api/orders?session=${encodeURIComponent(getSessionId())}`);
+    await sessionReady();
+    const r = await fetch("/api/orders");
     if (r.ok) set({ items: (await r.json()).items });
   },
   connect: () => {
-    const es = new EventSource(`/api/events?session=${encodeURIComponent(getSessionId())}`);
-    es.addEventListener("tx", (e) => {
-      try {
-        const tx = JSON.parse((e as MessageEvent).data) as Transaction;
-        get().upsert(tx, true);
-        if (tx.status === "COMPLETED" || tx.status === "AUTHORIZED") void get().refreshWallet();
-      } catch {
-        /* ignore malformed */
-      }
+    let es: EventSource | null = null;
+    let closed = false;
+    void sessionReady().then(() => {
+      if (closed) return;
+      es = new EventSource("/api/events");
+      es.addEventListener("tx", (e) => {
+        try {
+          const tx = JSON.parse((e as MessageEvent).data) as Transaction;
+          get().upsert(tx, true);
+          if (tx.status === "COMPLETED" || tx.status === "AUTHORIZED") void get().refreshWallet();
+        } catch {
+          /* ignore malformed */
+        }
+      });
     });
-    return () => es.close();
+    return () => {
+      closed = true;
+      es?.close();
+    };
   },
 }));

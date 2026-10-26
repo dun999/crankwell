@@ -40,12 +40,8 @@ export function saveWallet(sessionId: string, vault: pp.VaultInfo, email?: strin
 export async function removeWallet(sessionId: string) {
   const r = getRow(sessionId);
   if (!r) return;
-  try {
-    await pp.deletePaymentToken(r.vault_id);
-  } catch (e) {
-    // Already gone at PayPal (or revoked by the buyer): still forget it locally.
-    if (!(e instanceof pp.RestError && e.status === 404)) throw e;
-  }
+  // Already gone at PayPal (or revoked by the buyer) counts as removed, so it's forgotten here too.
+  await pp.deletePaymentToken(r.vault_id);
   db().prepare("DELETE FROM wallets WHERE session_id = ?").run(sessionId);
 }
 

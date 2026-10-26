@@ -1,24 +1,29 @@
 import { z } from "zod";
-import { Session, handle, json } from "@/lib/server/http";
+import { handle, json, requireSession } from "@/lib/server/http";
 import { listConnections, revokeConnections } from "@/lib/server/oauth";
 import { removeWallet, walletInfo } from "@/lib/server/wallet";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const view = (session: string) => ({
+  wallet: walletInfo(session),
+  connections: listConnections(session),
+  // Where a technician invoice goes by default: the saved PayPal's email, else the sandbox buyer.
+  invoiceEmail: walletInfo(session)?.email ?? process.env.INVOICE_RECIPIENT_EMAIL ?? null,
+});
+
 /** Saved PayPal (one-tap) and connected apps (Claude) for this browser. */
 export async function GET(req: Request) {
-  return handle(async () => {
-    const session = Session.parse(new URL(req.url).searchParams.get("session"));
-    return json({ wallet: walletInfo(session), connections: listConnections(session) });
-  });
+  return handle(async () => json(view(requireSession(req))));
 }
 
 export async function DELETE(req: Request) {
   return handle(async () => {
-    const b = z.object({ sessionId: Session, what: z.enum(["wallet", "connections"]) }).parse(await req.json());
-    if (b.what === "wallet") await removeWallet(b.sessionId);
-    else revokeConnections(b.sessionId);
-    return json({ wallet: walletInfo(b.sessionId), connections: listConnections(b.sessionId) });
+    const session = requireSession(req);
+    const b = z.object({ what: z.enum(["wallet", "connections"]) }).parse(await req.json());
+    if (b.what === "wallet") await removeWallet(session);
+    else revokeConnections(session);
+    return json(view(session));
   });
 }

@@ -44,9 +44,9 @@ export function ConfirmCard({ e }: { e: ActionEvent }) {
       })
       .catch(() => {});
     if (e.action.kind === "technician_invoice")
-      fetch("/api/config")
+      fetch("/api/wallet")
         .then((r) => r.json())
-        .then((c) => live && c.invoiceRecipient && setEmail((v) => v || c.invoiceRecipient))
+        .then((w) => live && w.invoiceEmail && setEmail((v) => v || w.invoiceEmail))
         .catch(() => {});
     return () => {
       live = false;

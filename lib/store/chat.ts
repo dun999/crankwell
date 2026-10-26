@@ -3,9 +3,9 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { getCar, getPart } from "@/lib/cars";
 import type { SystemId } from "@/lib/cars/types";
-import type { DiagnosisCase, SafetyTest, UiEvent } from "@/lib/agent/events";
+import type { DiagnosisCase, SafetyTest, TraceSummary, UiEvent } from "@/lib/agent/events";
 import type { Action } from "@/lib/commerce/types";
-import { getSessionId } from "@/lib/session";
+import { sessionReady } from "@/lib/session";
 import { useScene } from "./scene";
 import { createSelectiveStorage } from "./storage";
 
@@ -26,6 +26,8 @@ export interface ChatMessage {
   /** When the mechanic started on it, and how long the turn took. */
   startedAt?: number;
   ms?: number;
+  /** Which model answered, tokens and tool errors (from the server's turn trace). */
+  trace?: TraceSummary;
 }
 
 interface ChatState {
@@ -114,13 +116,13 @@ export const useChat = create<ChatState>()(
 
         controller = new AbortController();
         try {
+          await sessionReady();
           const res = await fetch("/api/agent", {
             method: "POST",
             headers: { "content-type": "application/json" },
             signal: controller.signal,
             body: JSON.stringify({
               conversationId: get().conversationId,
-              sessionId: getSessionId(),
               message: msg,
               view: { carId: scene.carId, selectedPart: scene.selected, location: get().location },
             }),
@@ -165,6 +167,8 @@ export const useChat = create<ChatState>()(
                 applyUiEvent(d);
               } else if (ev === "error") {
                 patch((b) => [...b, { kind: "error", text: d.message }]);
+              } else if (ev === "done" && d.trace) {
+                set((s) => ({ messages: s.messages.map((m) => (m.id === assistantId ? { ...m, trace: d.trace } : m)) }));
               }
             }
           }

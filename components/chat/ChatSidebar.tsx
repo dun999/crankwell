@@ -218,7 +218,7 @@ const Message = memo(function Message({ message: m, last, streaming }: { message
   const replies = offered?.type === "replies" ? offered.replies : ui.some((e) => e.type === "diagnosis") && !ui.some((e) => INTERACTIVE.has(e.type)) ? NEXT_STEPS : null;
   return (
     <div className="space-y-2.5">
-      {!streaming && <StepsSummary blocks={m.blocks} ms={m.ms} />}
+      {!streaming && <StepsSummary blocks={m.blocks} ms={m.ms} trace={m.trace} />}
       {m.blocks.map((b, i) => <AssistantBlock key={i} b={b} msgId={m.id} idx={i} />)}
       {streaming ? <AgentWorking blocks={m.blocks} startedAt={m.startedAt} /> : last && replies && <Replies replies={replies} />}
     </div>
