@@ -124,11 +124,18 @@ export interface Technician {
 
 // ───────────────────────── Agent-prepared actions ─────────────────────────
 
+/** An after-sale change to one of the user's orders (see lib/commerce/ops.ts for when each applies). */
+export type ChangeKind = "refund" | "check_in" | "cancel_reservation" | "cancel_invoice";
+export type ActionKind = TxKind | ChangeKind;
+
 /** What the agent proposes. The server prices it from the catalog; only the user can confirm it. */
 export type ActionPayload =
   | { kind: "parts"; carId: string; partId: string; items: { sku: string; quantity: number }[] }
   | { kind: "shop_deposit"; carId: string; partId?: string; shopId: string; slot: string; issue?: string; location?: { lat: number; lng: number } | null }
-  | { kind: "technician_invoice"; carId: string; partId?: string; technicianId: string; when: string; hours: number; issue?: string; email?: string };
+  | { kind: "technician_invoice"; carId: string; partId?: string; technicianId: string; when: string; hours: number; issue?: string; email?: string }
+  | { kind: ChangeKind; txId: string; reason?: string };
+
+export type ChangePayload = Extract<ActionPayload, { txId: string }>;
 
 export type ActionStatus = "pending" | "confirming" | "confirmed" | "expired" | "cancelled";
 
@@ -139,7 +146,7 @@ export interface ActionLine {
 
 export interface Action {
   id: string;
-  kind: TxKind;
+  kind: ActionKind;
   status: ActionStatus;
   source: "app" | "claude";
   caseId?: string;
@@ -151,8 +158,8 @@ export interface Action {
   policy: string;
   payload: ActionPayload;
   txId?: string;
-  /** How it was confirmed: one tap with saved PayPal, PayPal approval, or a sent invoice. */
-  via?: "vault" | "approval" | "invoice";
+  /** How it was confirmed: one tap with saved PayPal, PayPal approval, a sent invoice, or a change to an order. */
+  via?: "vault" | "approval" | "invoice" | "change";
   error?: string;
   createdAt: string;
   expiresAt: string;

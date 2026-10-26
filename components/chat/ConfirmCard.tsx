@@ -3,6 +3,7 @@ import { Loader2, ShieldCheck, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { UiEvent } from "@/lib/agent/events";
 import { actions } from "@/lib/commerce/client";
+import { CHANGE_COPY, isChange } from "@/lib/commerce/ops";
 import type { Action } from "@/lib/commerce/types";
 import { useOrders } from "@/lib/store/orders";
 import { ActionSummary } from "../commerce/ActionSummary";
@@ -67,6 +68,8 @@ export function ConfirmCard({ e }: { e: ActionEvent }) {
   const confirm = () => run(async () => setAction((await actions.confirm(action.id, email || undefined)).action));
 
   const oneTap = action.kind !== "technician_invoice" && blocker === null;
+  const change = isChange(action.kind) ? CHANGE_COPY[action.kind] : null;
+  const title = change ? change.ask : TITLE[action.kind as keyof typeof TITLE];
 
   if (action.status === "confirmed") return <Receipt action={action} />;
 
@@ -74,15 +77,29 @@ export function ConfirmCard({ e }: { e: ActionEvent }) {
     <div className="rise overflow-hidden rounded-2xl border border-line bg-surface-solid shadow-[var(--shadow-sm)]">
       <div className="flex items-center gap-2 border-b border-line bg-surface-2 px-3 py-2">
         <ShieldCheck size={14} className="shrink-0 text-accent" />
-        <span className="text-[13px] font-semibold">{action.status === "pending" || action.status === "confirming" ? TITLE[action.kind] : "Checkout closed"}</span>
+        <span className="text-[13px] font-semibold">{action.status === "pending" || action.status === "confirming" ? title : change ? "Closed" : "Checkout closed"}</span>
         <span className="sandbox-chip ml-auto">PayPal sandbox</span>
       </div>
       <div className="space-y-3 p-3.5">
         <ActionSummary action={action} compact />
         {action.status === "expired" || action.status === "cancelled" ? (
           <p className="rounded-xl bg-surface-2 px-3 py-2 text-xs text-muted">
-            {action.status === "expired" ? "This offer expired after 15 minutes. Ask again and I'll prepare it fresh." : "Cancelled. Nothing was charged."}
+            {change
+              ? action.status === "expired"
+                ? "This expired after 15 minutes. The order is unchanged."
+                : "Dismissed. The order is unchanged."
+              : action.status === "expired"
+                ? "This offer expired after 15 minutes. Ask again and I'll prepare it fresh."
+                : "Cancelled. Nothing was charged."}
           </p>
+        ) : change ? (
+          <div className="space-y-1.5">
+            <Button variant={action.kind === "check_in" ? "primary" : "danger"} className="h-11 w-full text-[14px]" disabled={busy} onClick={confirm}>
+              {busy && <Loader2 size={15} className="animate-spin" />} {change.button}
+              {action.kind === "refund" || action.kind === "check_in" ? ` · $${Number(action.amount).toFixed(2)}` : ""}
+            </Button>
+            <p className="text-center text-[11px] text-muted">Done with PayPal right away. Nothing changes until you tap.</p>
+          </div>
         ) : action.kind === "technician_invoice" ? (
           <div className="space-y-2">
             <label className="field block">

@@ -7,6 +7,7 @@ import type { CarId } from "@/lib/cars/types";
 import { DEFAULT_LOCATION, findShops, findTechnicians, getShop, getTechnician, slotOpen } from "@/lib/catalog/providers";
 import { slotLabel } from "@/lib/catalog/slots";
 import { findSku, getSpareParts } from "@/lib/catalog/spare-parts";
+import { CHANGE_KINDS } from "@/lib/commerce/ops";
 import type { ActionPayload, RepairShop, SparePart, Technician } from "@/lib/commerce/types";
 import { oneTapBlocker, prepareAction } from "@/lib/server/actions";
 import { CommerceError } from "@/lib/server/commerce";
@@ -14,6 +15,13 @@ import { ordersForAgent } from "@/lib/server/reconcile";
 import type { RecommendedAction, Suspect, UiEvent, ViewContext } from "./events";
 
 export const CarIdS = z.enum(["corolla", "crv"]);
+/** A change to an order the user already has (flat, like PrepareActionS). */
+export const OrderChangeS = z.object({
+  order_ref: z.string().max(60).describe("The order_ref from get_orders"),
+  change: z.enum(CHANGE_KINDS).describe("One of that order's allowed_changes from get_orders"),
+  reason: z.string().max(120).optional().describe("Why, in the user's words, e.g. 'Ordered the wrong pads'"),
+});
+
 export const SPECIALTIES = ["brakes", "engine", "transmission", "electrical", "suspension", "cooling", "exhaust", "tires", "body", "general"] as const;
 
 /** A purchase the user asked for. Flat on purpose: models fill flat schemas more reliably than unions. */
@@ -107,6 +115,7 @@ const schemas = {
   }),
   prepare_action: PrepareActionS,
   get_orders: z.object({}),
+  prepare_order_change: OrderChangeS,
 } as const;
 
 export type ToolName = keyof typeof schemas;
@@ -132,7 +141,10 @@ const DESCRIPTIONS: Record<ToolName, string> = {
     "Show the user's options as cards with built-in PayPal checkout (parts), PayPal invoice (technician) or PayPal deposit authorization (shop). Use exact IDs from the lookup tools.",
   prepare_action:
     "Prepare a purchase the user asked for: buy a part, reserve a repair shop (refundable deposit hold) or book a mobile technician (PayPal invoice). The server prices it and shows a confirm card. Nothing is charged until the user taps Confirm (one tap with saved PayPal, otherwise PayPal approval). Call it only when the user asks you to buy, book or reserve, or accepts your suggestion. Use exact ids from the lookup tools.",
-  get_orders: "Get the user's PayPal orders, shop reservations and technician invoices, with open ones checked live against PayPal (paypal_check), plus anything still waiting for their confirmation.",
+  get_orders:
+    "Get the user's PayPal orders, shop reservations and technician invoices, with open ones checked live against PayPal (paypal_check), what can be changed on each (allowed_changes), plus anything still waiting for their confirmation.",
+  prepare_order_change:
+    "Prepare a change to an order the user already has: refund a part or captured deposit, check in at a shop (capture the held deposit), cancel a reservation (release the hold) or cancel an unpaid technician invoice. Call get_orders first and use its order_ref and one of allowed_changes. Shows a confirm card; nothing changes until the user taps it. Call it only when the user asks for that change.",
 };
 
 /** What the user sees while a tool runs. */
@@ -149,6 +161,7 @@ export const TOOL_LABELS: Record<ToolName, string> = {
   suggest_replies: "Wrapping up",
   prepare_action: "Preparing your PayPal sandbox checkout",
   get_orders: "Checking your PayPal orders",
+  prepare_order_change: "Preparing the change to your order",
 };
 
 export const TOOLS: OpenAI.Chat.ChatCompletionTool[] = (Object.keys(schemas) as ToolName[]).map((name) => {
@@ -373,6 +386,17 @@ async function exec(name: ToolName, input: unknown, ctx: ToolContext): Promise<u
     case "get_orders": {
       schemas.get_orders.parse(input ?? {});
       return ordersForAgent(ctx.sessionId);
+    }
+    case "prepare_order_change": {
+      const a = schemas.prepare_order_change.parse(input);
+      const action = prepareAction(ctx.sessionId, { kind: a.change, txId: a.order_ref, reason: a.reason }, { source: "app" });
+      ctx.emit({ type: "action", action, oneTap: true });
+      return {
+        prepared: action.title,
+        amount_usd: action.amount,
+        policy: action.policy,
+        note: "Shown as a confirm card. Nothing changes until the user taps it. Don't say it's done; call get_orders if they ask.",
+      };
     }
   }
 }

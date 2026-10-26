@@ -1,22 +1,28 @@
 import "server-only";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import type { Action, ActionLine, ActionPayload, Transaction } from "@/lib/commerce/types";
+import { CHANGE_COPY, allowedOps, isChange } from "@/lib/commerce/ops";
+import type { Action, ActionLine, ActionPayload, ChangePayload, Transaction } from "@/lib/commerce/types";
 import {
   CommerceError,
   authorizeOrder,
+  cancelInvoice,
+  captureDeposit,
   captureOrder,
   createDepositOrder,
   createPartsOrder,
   quoteDeposit,
   quoteParts,
   quoteTechnician,
+  refund,
   sendTechnicianInvoice,
+  voidDeposit,
 } from "./commerce";
 import { db, serverSecret, txFind, txForAction, txGet } from "./db";
 import { walletInfo, walletVaultId } from "./wallet";
 
 // Agent-prepared actions. The agent (in-app or Claude over MCP) can only propose one; the server prices it
 // from the catalog, and only the user's tap confirms it: one tap with saved PayPal, or PayPal approval.
+// After a purchase the same goes for changes to it (refund, check-in, cancel): proposed, then tapped.
 
 export const ACTION_TTL_MS = 15 * 60_000;
 /** One-tap (saved PayPal) guardrails. Larger amounts go through PayPal approval. */
@@ -33,8 +39,58 @@ interface Row {
   data: string;
 }
 
+type Quote = Pick<Action, "kind" | "title" | "summary" | "lines" | "amount" | "policy" | "payload">;
+
+/** The order a change is for, checked against the session and what the order allows now. */
+function changeTarget(p: ChangePayload, sessionId: string): Transaction {
+  const tx = txGet(p.txId);
+  if (!tx || tx.sessionId !== sessionId) throw new CommerceError("Order not found. Use an order_ref from get_orders.", 404);
+  const allowed = allowedOps(tx);
+  if (!allowed.includes(p.kind)) {
+    throw new CommerceError(`Can't ${p.kind.replace(/_/g, " ")} this order: it is ${tx.status.toLowerCase()}. ${allowed.length ? `Possible now: ${allowed.join(", ")}.` : "No changes are possible now."}`, 409);
+  }
+  return tx;
+}
+
+function quoteChange(p: ChangePayload, sessionId: string): Quote {
+  const tx = changeTarget(p, sessionId);
+  const amount = usd(Number(tx.amount));
+  const ref = tx.paypal.invoiceNumber
+    ? `PayPal invoice ${tx.paypal.invoiceNumber}`
+    : tx.status === "AUTHORIZED"
+      ? `PayPal hold ${tx.paypal.authorizationId}`
+      : `PayPal capture ${tx.paypal.captureId}`;
+  const base = { kind: p.kind, amount, payload: p, summary: `${ref}${p.reason ? ` · ${p.reason}` : ""}` };
+  switch (p.kind) {
+    case "refund":
+      return { ...base, title: `Refund · ${tx.title}`, lines: [{ label: tx.kind === "shop_deposit" ? "Captured deposit" : "Paid for this order", amount }], policy: "Back to the original PayPal payment · Payments v2 refund" };
+    case "check_in":
+      return { ...base, title: `Check in · ${tx.title}`, lines: [{ label: "Deposit on hold", amount }], policy: "Charged now · the shop's hold is captured (Payments v2)" };
+    case "cancel_reservation":
+      return { ...base, title: `Cancel · ${tx.title}`, lines: [{ label: "Deposit on hold", amount }], policy: "Nothing is charged · the hold is voided (Payments v2)" };
+    case "cancel_invoice":
+      return { ...base, title: `Cancel invoice · ${tx.title}`, lines: [{ label: "Invoice total", amount }], policy: "Nothing is charged · PayPal cancels the invoice and the visit is released" };
+  }
+}
+
+/** Run a confirmed change. The order is checked again: it may have moved since the card was shown. */
+async function runChange(p: ChangePayload, sessionId: string): Promise<Transaction> {
+  changeTarget(p, sessionId);
+  switch (p.kind) {
+    case "refund":
+      return refund(p.txId, sessionId);
+    case "check_in":
+      return captureDeposit(p.txId, sessionId);
+    case "cancel_reservation":
+      return voidDeposit(p.txId, sessionId);
+    case "cancel_invoice":
+      return cancelInvoice(p.txId, sessionId);
+  }
+}
+
 /** Price and describe a proposal from the server catalog. Throws CommerceError on bad ids. */
-export function quoteAction(payload: ActionPayload): Pick<Action, "kind" | "title" | "summary" | "lines" | "amount" | "policy" | "payload"> {
+export function quoteAction(payload: ActionPayload, sessionId: string): Quote {
+  if ("txId" in payload) return quoteChange(payload, sessionId);
   switch (payload.kind) {
     case "parts": {
       const q = quoteParts(payload);
@@ -111,7 +167,12 @@ function owned(id: string, sessionId: string) {
 }
 
 export function prepareAction(sessionId: string, payload: ActionPayload, opts: { source: Action["source"]; caseId?: string }): Action {
-  const q = quoteAction(payload);
+  const q = quoteAction(payload, sessionId);
+  // Asking twice for the same change shows the same card.
+  if ("txId" in payload) {
+    const same = listActions(sessionId).find((a) => a.status === "pending" && "txId" in a.payload && a.payload.txId === payload.txId && a.kind === payload.kind);
+    if (same) return same;
+  }
   const created = new Date();
   const action: Action = {
     id: `act_${randomUUID()}`,
@@ -163,7 +224,7 @@ function oneTapSpentToday(sessionId: string) {
 
 /** Why one-tap isn't available for this action, or null when it is. */
 export function oneTapBlocker(action: Action, sessionId: string): string | null {
-  if (action.kind === "technician_invoice") return null;
+  if (action.kind === "technician_invoice" || isChange(action.kind)) return null;
   if (!walletVaultId(sessionId)) return "Approve this one in PayPal and tick “Save PayPal” to enable one-tap.";
   const amount = Number(action.amount);
   if (amount > ONE_TAP_MAX) return `One-tap is limited to $${ONE_TAP_MAX} per order. Approve this one in PayPal.`;
@@ -193,11 +254,21 @@ export function actionStatus(id: string, sessionId: string) {
   const a = owned(id, sessionId);
   const tx = a.txId ? txGet(a.txId) : undefined;
   const paypal = tx
-    ? { status: tx.status, order_id: tx.paypal.orderId, capture_id: tx.paypal.captureId, authorization_id: tx.paypal.authorizationId, invoice_id: tx.paypal.invoiceId, invoice_url: tx.paypal.payerViewUrl }
+    ? {
+        status: tx.status,
+        order_id: tx.paypal.orderId,
+        capture_id: tx.paypal.captureId,
+        authorization_id: tx.paypal.authorizationId,
+        refund_id: tx.paypal.refundId,
+        invoice_id: tx.paypal.invoiceId,
+        invoice_url: tx.paypal.payerViewUrl,
+      }
     : undefined;
   const message =
     a.status === "confirmed"
-      ? a.kind === "technician_invoice"
+      ? isChange(a.kind)
+        ? CHANGE_COPY[a.kind].status
+        : a.kind === "technician_invoice"
         ? "PayPal invoice sent. The visit is confirmed when the invoice is paid."
         : a.kind === "shop_deposit"
           ? "Deposit authorized (held, not charged) with PayPal."
@@ -233,8 +304,17 @@ export async function confirmAction(id: string, sessionId: string, opts: { origi
 
   // Compare-and-set so a double tap can't pay twice.
   if (!write(id, { status: "confirming", confirmingSince: now(), error: undefined }, "pending")) throw new CommerceError("Already confirming", 409);
+  const p = a.payload;
+  if ("txId" in p) {
+    try {
+      const tx = await runChange(p, sessionId);
+      return { action: write(id, { status: "confirmed", txId: tx.id, via: "change", confirmedAt: now() })!, tx };
+    } catch (e) {
+      write(id, { status: "pending", error: e instanceof Error ? e.message : "The change failed" });
+      throw e;
+    }
+  }
   try {
-    const p = a.payload;
     let tx: Transaction;
     if (p.kind === "technician_invoice") {
       tx = await sendTechnicianInvoice({ ...p, sessionId, email: email!, actionId: id });
@@ -266,6 +346,7 @@ export async function startApproval(id: string, opts: { origin: string; save: bo
   if (a.status === "confirmed") throw new CommerceError("Already paid", 409);
   if (a.status !== "pending") throw new CommerceError(a.status === "expired" ? "This offer expired. Ask the mechanic to prepare it again." : "This action is no longer open", 410);
   const p = a.payload;
+  if ("txId" in p) throw new CommerceError("Changes to an order need no PayPal approval. Use Confirm instead.");
   if (p.kind === "technician_invoice") throw new CommerceError("Technician visits are booked with a PayPal invoice. Use Confirm instead.");
   const urls = opts.returnTo === "pay" ? { returnUrl: `${opts.origin}/pay/return`, cancelUrl: `${opts.origin}/pay/${id}?cancelled=1` } : {};
   const checkout = { sessionId, origin: opts.origin, actionId: id, vault: opts.save ? ({ save: true } as const) : undefined, ...urls };

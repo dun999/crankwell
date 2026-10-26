@@ -1,4 +1,5 @@
 import "server-only";
+import { allowedOps } from "@/lib/commerce/ops";
 import type { Transaction, TxStatus } from "@/lib/commerce/types";
 import { completeApproval, listActions, markActionSettled, recoverStuckActions } from "./actions";
 import { abandonCheckout, applyOrderState, awaitingBuyer, listTransactions, syncInvoice } from "./commerce";
@@ -156,6 +157,7 @@ export async function ordersForAgent(sessionId: string, opts: { actionIds?: bool
         created: t.createdAt,
         last_event: t.events[t.events.length - 1]?.type,
         paypal_check: checks.get(t.id) ?? (LIVE.includes(t.status) ? "unavailable" : "final"),
+        allowed_changes: allowedOps(t),
         paypal: {
           order_id: t.paypal.orderId,
           capture_id: t.paypal.captureId,

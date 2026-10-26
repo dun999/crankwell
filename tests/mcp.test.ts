@@ -13,6 +13,10 @@ const pp = vi.hoisted(() => ({
   authorizeOrder: vi.fn(),
   createAndSendInvoice: vi.fn(),
   deletePaymentToken: vi.fn(),
+  voidAuthorization: vi.fn(async () => undefined),
+  getOrder: vi.fn(async () => {
+    throw new Error("offline");
+  }),
 }));
 vi.mock("@/lib/server/paypal", () => ({
   ...pp,
@@ -111,6 +115,28 @@ describe("MCP connector", () => {
 
     const status = (await call("get_purchase_status", { action_id: actionId }, token)).body.result!;
     expect(status.content![0].text).toMatch(/held, not charged/);
+  });
+
+  it("prepares a change to an order from get_orders and lets only the card confirm it", async () => {
+    const orders = JSON.parse((await call("get_orders", {}, token)).body.result!.content![0].text);
+    const held = orders.orders.find((o: { kind: string; status: string }) => o.kind === "shop_deposit" && o.status === "AUTHORIZED");
+    expect(held.allowed_changes).toEqual(["check_in", "cancel_reservation"]);
+
+    const prep = (await call("prepare_order_change", { order_ref: held.order_ref, change: "cancel_reservation" }, token)).body.result!;
+    if (prep.isError) throw new Error(prep.content![0].text);
+    expect(prep.structuredContent).toMatchObject({ view: "checkout", one_tap: true, action: { kind: "cancel_reservation" } });
+    expect(pp.voidAuthorization).not.toHaveBeenCalled();
+
+    const actionId = (prep.structuredContent!.action as { id: string }).id;
+    const key = prep._meta!["crankwell/confirmKey"] as string;
+    const tap = (await call("confirm_purchase", { action_id: actionId, confirm_key: key }, token)).body.result!;
+    expect(tap.isError).toBeFalsy();
+    expect(pp.voidAuthorization).toHaveBeenCalledTimes(1);
+    expect((await call("get_purchase_status", { action_id: actionId }, token)).body.result!.content![0].text).toMatch(/hold was released/);
+
+    const other = await pair("session-mcp-3");
+    const peek = (await call("prepare_order_change", { order_ref: held.order_ref, change: "check_in" }, other)).body.result!;
+    expect(peek.isError).toBe(true);
   });
 
   it("keeps another browser's purchases private", async () => {

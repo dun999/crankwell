@@ -7,6 +7,7 @@ import { SAFETY_RULES } from "@/lib/agent/prompt";
 import {
   CarIdS,
   DiagnosisSuspectS,
+  OrderChangeS,
   PrepareActionS,
   RecommendedOptionS,
   SPECIALTIES,
@@ -35,7 +36,7 @@ import { mcpRequest } from "./context";
 
 export const CARD_URI = "ui://crankwell/card";
 /** Tools that act for a paired browser. Calling one before pairing returns 401, which makes Claude show Connect. */
-export const PROTECTED_TOOLS = new Set(["prepare_purchase", "get_purchase_status", "get_orders", "confirm_purchase"]);
+export const PROTECTED_TOOLS = new Set(["prepare_purchase", "prepare_order_change", "get_purchase_status", "get_orders", "confirm_purchase"]);
 const CONFIRM_KEY_META = "crankwell/confirmKey";
 
 export const MCP_INSTRUCTIONS = `Crankwell is an AI mechanic with PayPal checkout. Use it when someone describes a car problem or wants a part, a mobile mechanic or a repair-shop booking.
@@ -46,6 +47,7 @@ Workflow:
 3. If it's ambiguous, ask for one or two safe checks in chat (follow the safety rules), then call show_diagnosis again.
 4. Look up real options first (search_spare_parts, find_technicians, find_repair_shops), then show_options with 2-4 options from safest to least safe: diy only when genuinely beginner-safe, buy_part, book_technician (comes to the car; best when it shouldn't be driven), reserve_shop, tow.
 5. When the user asks to buy, book or reserve, call prepare_purchase. It shows a PayPal checkout card. You cannot pay: the user confirms with one tap (saved PayPal) or approves in PayPal. Never say something is paid, booked or reserved until get_purchase_status says so.
+6. After a purchase, when the user wants a refund, to check in at the shop, to cancel a reservation or to cancel an unpaid invoice: get_orders, then prepare_order_change with that order's order_ref and one of its allowed_changes. It shows a confirm card; nothing changes until the user taps it.
 The first prepare_purchase asks the user to connect Crankwell once (it links Claude to their Crankwell browser, where orders appear).
 
 Safety rules:
@@ -332,6 +334,29 @@ export function registerCrankwell(server: McpServer) {
             (view.one_tap ? "The user can confirm with one tap on the card" : "The user approves it with PayPal from the card") +
             `, or at ${view.pay_url}. It expires in 15 minutes. Don't say it's paid until get_purchase_status says so (action_id ${action.id}).`,
           view,
+          { [CONFIRM_KEY_META]: confirmKey(action.id) },
+        );
+      }),
+  );
+
+  registerAppTool(
+    server,
+    "prepare_order_change",
+    {
+      title: "Prepare a change to an order",
+      description:
+        "Prepare a change to an order the user already has and show it as a confirm card: refund (a part or captured deposit), check_in (capture the held shop deposit), cancel_reservation (release the hold) or cancel_invoice (an unpaid technician invoice). Use an order_ref and one of its allowed_changes from get_orders. Nothing changes until the user taps the card.",
+      inputSchema: OrderChangeS,
+      annotations: { title: "Prepare a change to an order", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      _meta: ui,
+    },
+    (a) =>
+      guard(() => {
+        const sessionId = session();
+        const action = prepareAction(sessionId, { kind: a.change, txId: a.order_ref, reason: a.reason }, { source: "claude" });
+        return text(
+          `Prepared "${action.title}" (${action.policy}). Nothing has changed yet: the user confirms on the card or at ${payUrl(action.id)}. Don't say it's done until get_purchase_status says so (action_id ${action.id}).`,
+          checkoutView(action, sessionId),
           { [CONFIRM_KEY_META]: confirmKey(action.id) },
         );
       }),

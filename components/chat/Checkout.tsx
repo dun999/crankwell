@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { AlertTriangle, Check, Copy, CreditCard, ExternalLink, Loader2, Webhook } from "lucide-react";
 import { useEffect, useState } from "react";
 import { actions, type ActionStatus } from "@/lib/commerce/client";
+import { CHANGE_COPY, isChange } from "@/lib/commerce/ops";
 import type { Action } from "@/lib/commerce/types";
 import { useChat, type Block } from "@/lib/store/chat";
 import { useOrders } from "@/lib/store/orders";
@@ -93,7 +94,7 @@ export function PreparingCheckout({ b, msgId, idx }: { b: Extract<Block, { kind:
 }
 
 const DONE = { parts: "Payment complete", shop_deposit: "Deposit held", technician_invoice: "Invoice sent" };
-const VIA = { vault: "Paid with saved PayPal in one tap", approval: "Approved in PayPal", invoice: "Sent with PayPal Invoicing" };
+const VIA = { vault: "Paid with saved PayPal in one tap", approval: "Approved in PayPal", invoice: "Sent with PayPal Invoicing", change: "Done with PayPal from the chat" };
 const fmt = (v: string) => `$${Number(v).toFixed(2)}`;
 
 /** The receipt once PayPal has it: invoice details, PayPal references and the live transaction status. */
@@ -111,10 +112,12 @@ export function Receipt({ action }: { action: Action }) {
       ["PayPal order", tx?.paypal.orderId],
       ["Capture", tx?.paypal.captureId],
       ["Authorization", tx?.paypal.authorizationId],
+      ["Refund", tx?.paypal.refundId],
       ["PayPal invoice", tx?.paypal.invoiceId],
     ] satisfies [string, string | undefined][]
   ).flatMap(([k, v]) => (v ? [[k, v] as const] : []));
-  const held = action.kind === "shop_deposit";
+  const change = isChange(action.kind) ? CHANGE_COPY[action.kind] : null;
+  const total = change ? change.total : action.kind === "shop_deposit" ? "Held on PayPal" : action.kind === "technician_invoice" ? "Invoice total" : "Total paid";
 
   return (
     <div className="rise overflow-hidden rounded-2xl border border-line bg-surface-solid shadow-[var(--shadow-sm)]">
@@ -123,7 +126,7 @@ export function Receipt({ action }: { action: Action }) {
           <Check size={18} strokeWidth={3} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[14px] font-semibold leading-tight">{DONE[action.kind]}</div>
+          <div className="text-[14px] font-semibold leading-tight">{change ? change.done : DONE[action.kind as keyof typeof DONE]}</div>
           <div className="mt-0.5 truncate text-[11px] text-muted">{action.via ? VIA[action.via] : "PayPal"} · sandbox</div>
         </div>
         {tx && <StatusPill status={tx.status} press />}
@@ -132,7 +135,7 @@ export function Receipt({ action }: { action: Action }) {
       <div className="receipt-body mx-3.5 border-t border-dashed border-line-strong">
         <dl className="grid grid-cols-2 gap-x-3 gap-y-2 py-3">
           <div>
-            <dt className="fig">{action.kind === "technician_invoice" ? "PayPal invoice" : "Invoice no."}</dt>
+            <dt className="fig">{change ? "Order ref" : action.kind === "technician_invoice" ? "PayPal invoice" : "Invoice no."}</dt>
             <dd className="mono mt-0.5 text-[12px]">{number ?? "…"}</dd>
           </div>
           <div>
@@ -145,7 +148,7 @@ export function Receipt({ action }: { action: Action }) {
           </div>
           {tx?.paypal.payerEmail && (
             <div className="col-span-2 min-w-0">
-              <dt className="fig">{action.kind === "technician_invoice" ? "Sent to" : "Paid by"}</dt>
+              <dt className="fig">{change ? "PayPal account" : action.kind === "technician_invoice" ? "Sent to" : "Paid by"}</dt>
               <dd className="mt-0.5 truncate text-[12px]">{tx.paypal.payerEmail}</dd>
             </div>
           )}
@@ -159,7 +162,7 @@ export function Receipt({ action }: { action: Action }) {
             </div>
           ))}
           <div className="flex justify-between gap-3 border-t border-line pt-2 text-[13.5px] font-semibold">
-            <dt>{held ? "Held on PayPal" : action.kind === "technician_invoice" ? "Invoice total" : "Total paid"}</dt>
+            <dt>{total}</dt>
             <dd className="num">{fmt(action.amount)} USD</dd>
           </div>
         </dl>

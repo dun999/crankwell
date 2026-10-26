@@ -2,6 +2,7 @@
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { CHANGE_COPY, isChange } from "@/lib/commerce/ops";
 import type { Action, WalletInfo } from "@/lib/commerce/types";
 import { sessionReady } from "@/lib/session";
 import { Button } from "../ui";
@@ -59,6 +60,18 @@ export function PayPanel({ initial, notice }: { initial: Action; notice?: { kind
     }
   };
 
+  const change = isChange(a.kind) ? CHANGE_COPY[a.kind] : null;
+
+  if (a.status === "confirmed" && change) {
+    return (
+      <div className="mt-5 rounded-2xl border border-ok/30 bg-ok/8 p-4">
+        <div className="flex items-center gap-2 font-semibold text-ok">
+          <CheckCircle2 size={18} /> {change.done}
+        </div>
+        <p className="mt-1.5 text-sm text-muted">{change.status} You can close this tab and go back to Claude.</p>
+      </div>
+    );
+  }
   if (a.status === "confirmed") {
     return (
       <div className="mt-5 rounded-2xl border border-ok/30 bg-ok/8 p-4">
@@ -78,7 +91,11 @@ export function PayPanel({ initial, notice }: { initial: Action; notice?: { kind
     return (
       <div className="mt-5 flex items-start gap-2 rounded-2xl border border-line bg-surface-2 p-4 text-sm">
         <XCircle size={16} className="mt-0.5 shrink-0 text-muted" />
-        {a.status === "expired" ? "This offer expired after 15 minutes. Ask Claude to prepare it again." : "This was cancelled. Nothing was charged."}
+        {change
+          ? "This closed without changes to the order."
+          : a.status === "expired"
+            ? "This offer expired after 15 minutes. Ask Claude to prepare it again."
+            : "This was cancelled. Nothing was charged."}
       </div>
     );
   }
@@ -88,7 +105,15 @@ export function PayPanel({ initial, notice }: { initial: Action; notice?: { kind
   return (
     <div className="mt-5 space-y-3">
       {notice?.kind === "cancelled" && <p className="rounded-xl bg-surface-2 px-3 py-2 text-sm text-muted">PayPal checkout was cancelled. Nothing was charged.</p>}
-      {a.kind === "technician_invoice" ? (
+      {change ? (
+        s.mine ? (
+          <Button variant={a.kind === "check_in" ? "primary" : "danger"} className="h-12 w-full text-[15px]" disabled={!!busy} onClick={() => run("confirm", async () => setS({ ...s, ...(await post<Status>(`/api/actions/${a.id}/confirm`, {})) }))}>
+            {busy === "confirm" && <Loader2 size={15} className="animate-spin" />} {change.button}
+          </Button>
+        ) : (
+          <p className="text-sm text-muted">Open this link in the browser you connected to Claude to make this change.</p>
+        )
+      ) : a.kind === "technician_invoice" ? (
         s.mine ? (
           <>
             <label className="field block">

@@ -4,7 +4,8 @@ import { ExternalLink, Link2, Receipt, RefreshCw, ShieldAlert, Webhook, X, Zap }
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { commerce } from "@/lib/commerce/client";
-import type { Transaction } from "@/lib/commerce/types";
+import { allowedOps } from "@/lib/commerce/ops";
+import type { ChangeKind, Transaction } from "@/lib/commerce/types";
 import { useOrders } from "@/lib/store/orders";
 import { Button, IconButton, Modal, money } from "../ui";
 import { KIND, StatusPill } from "./txMeta";
@@ -13,6 +14,14 @@ const OrdersLedger = dynamic(() => import("./OrdersLedger"), {
   ssr: false,
   loading: () => <p role="status" className="p-4 text-sm text-muted">Loading ledger…</p>,
 });
+
+/** The Orders panel's own buttons for each change (the same changes the mechanic can prepare). */
+const OP_BUTTON: Record<ChangeKind, { label: (tx: Transaction) => string; busy: string; variant: "primary" | "secondary" | "ghost" | "danger"; run: (id: string) => Promise<unknown> }> = {
+  check_in: { label: () => "I checked in (capture)", busy: "Capturing…", variant: "primary", run: (id) => commerce.captureDeposit(id) },
+  cancel_reservation: { label: () => "Cancel (void hold)", busy: "Releasing…", variant: "secondary", run: (id) => commerce.voidDeposit(id) },
+  refund: { label: (tx) => (tx.kind === "shop_deposit" ? "Refund deposit" : "Cancel & refund"), busy: "Refunding…", variant: "danger", run: (id) => commerce.refund(id) },
+  cancel_invoice: { label: () => "Cancel invoice", busy: "Cancelling…", variant: "ghost", run: (id) => commerce.cancelInvoice(id) },
+};
 
 const words = (s?: string) => (s ? s.toLowerCase().replace(/_/g, " ") : "");
 
@@ -74,26 +83,6 @@ function TxDetail({ tx }: { tx: Transaction }) {
       {tx.dispute && <DisputeNote d={tx.dispute} />}
 
       <div className="flex flex-wrap gap-1.5">
-        {tx.kind === "parts" && tx.status === "COMPLETED" && (
-          <Button size="sm" variant="danger" disabled={!!busy} onClick={() => run("refund", () => commerce.refund(tx.id))}>
-            {busy === "refund" ? "Refunding…" : "Cancel & refund"}
-          </Button>
-        )}
-        {tx.kind === "shop_deposit" && tx.status === "AUTHORIZED" && (
-          <>
-            <Button size="sm" variant="primary" disabled={!!busy} onClick={() => run("capture", () => commerce.captureDeposit(tx.id))}>
-              {busy === "capture" ? "Capturing…" : "I checked in (capture)"}
-            </Button>
-            <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => run("void", () => commerce.voidDeposit(tx.id))}>
-              {busy === "void" ? "Releasing…" : "Cancel (void hold)"}
-            </Button>
-          </>
-        )}
-        {tx.kind === "shop_deposit" && tx.status === "CAPTURED" && (
-          <Button size="sm" variant="danger" disabled={!!busy} onClick={() => run("refund", () => commerce.refund(tx.id))}>
-            {busy === "refund" ? "Refunding…" : "Refund deposit"}
-          </Button>
-        )}
         {tx.kind === "technician_invoice" && ["SENT", "UNPAID"].includes(tx.status) && (
           <>
             {tx.paypal.payerViewUrl && (
@@ -104,11 +93,16 @@ function TxDetail({ tx }: { tx: Transaction }) {
             <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => run("refresh", () => commerce.refreshInvoice(tx.id))}>
               <RefreshCw size={12} className={busy === "refresh" ? "animate-spin" : ""} /> Refresh
             </Button>
-            <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => run("cancel", () => commerce.cancelInvoice(tx.id))}>
-              Cancel invoice
-            </Button>
           </>
         )}
+        {allowedOps(tx).map((op) => {
+          const b = OP_BUTTON[op];
+          return (
+            <Button key={op} size="sm" variant={b.variant} disabled={!!busy} onClick={() => run(op, () => b.run(tx.id))}>
+              {busy === op ? b.busy : b.label(tx)}
+            </Button>
+          );
+        })}
       </div>
       {err && <div className="text-xs text-danger">{err}</div>}
 
