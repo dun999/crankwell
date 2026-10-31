@@ -301,6 +301,10 @@ body {
 .ag-theme-crankwell .ag-row { cursor: pointer; }
 .ag-theme-crankwell .ag-header-cell-text { font: 500 10.5px/1 var(--font-geist-mono), monospace; letter-spacing: 0.08em; text-transform: uppercase; }
 .ag-theme-crankwell .ag-cell { display: flex; align-items: center; }
+.ag-theme-crankwell .ag-right-aligned-cell { justify-content: flex-end; }
+/* The ledger's money-flow detail: snug to its rows. */
+.ag-theme-crankwell .ag-details-row { padding: 6px 12px 10px 44px; }
+.ag-theme-crankwell .ag-details-row .ag-layout-auto-height .ag-center-cols-viewport { min-height: 0; }
 .ag-theme-crankwell .ag-row-selected::before { box-shadow: inset 2px 0 0 var(--accent); }
 .ag-theme-crankwell .num { font-family: var(--font-geist-mono), monospace; font-size: 12px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 

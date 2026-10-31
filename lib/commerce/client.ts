@@ -81,6 +81,10 @@ export const actions = {
 };
 
 /** Spending limits: what the mechanic may buy without a card per purchase. */
+/** "Ask" a grid: its AG Grid AI Toolkit schema and a question in, grid state out. */
+export const askGrid = (body: { grid: "parts" | "orders"; question: string; schema: unknown; state: unknown; today: string }) =>
+  post<{ state: Record<string, unknown>; explanation: string; model: string }>("/api/grid/query", body);
+
 export const mandates = {
   list: async (): Promise<Mandate[]> => {
     await sessionReady();

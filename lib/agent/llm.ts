@@ -98,6 +98,27 @@ export async function openStream(
   throw new AllProvidersFailed(errors);
 }
 
+/** One non-streaming completion with the same failover, for small structured jobs (the grids' Ask). */
+export async function complete(
+  build: (p: Provider) => OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
+  opts: { signal?: AbortSignal } = {},
+): Promise<{ provider: Provider; completion: OpenAI.Chat.ChatCompletion }> {
+  const errors: AllProvidersFailed["errors"] = [];
+  for (const p of rotation()) {
+    try {
+      const completion = await clientFor(p).chat.completions.create(build(p), { signal: opts.signal });
+      down.delete(p.id);
+      return { provider: p, completion };
+    } catch (e) {
+      if (opts.signal?.aborted) throw e;
+      if (isOutage(e)) down.set(p.id, { until: Date.now() + COOL_DOWN_MS, reason: describe(e) });
+      console.warn(`[llm] ${p.id} (${p.host}) failed: ${describe(e)}`);
+      errors.push({ provider: p.id, message: describe(e) });
+    }
+  }
+  throw new AllProvidersFailed(errors);
+}
+
 /** Provider health for /api/health. `deep` sends a 1-token request to each (cached for 5 minutes). */
 export async function providerHealth(deep: boolean) {
   return Promise.all(

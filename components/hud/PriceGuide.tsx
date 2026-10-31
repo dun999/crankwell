@@ -1,5 +1,5 @@
 "use client";
-import type { ColDef, GetRowIdParams, ICellRendererParams, IRowNode, RowClickedEvent } from "ag-grid-community";
+import type { ColDef, GetRowIdParams, GridApi, ICellRendererParams, IRowNode, RowClickedEvent, StructuredSchemaParams } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
 import clsx from "clsx";
 import { Crosshair, MessageCircle, Search, Table2, X } from "lucide-react";
@@ -9,6 +9,7 @@ import { SYSTEM_IDS, SYSTEM_META, type CarId, type SystemId } from "@/lib/cars/t
 import { useMediaQuery } from "@/lib/hooks";
 import { useChat } from "@/lib/store/chat";
 import { useScene } from "@/lib/store/scene";
+import { GridAsk } from "../grid/GridAsk";
 import { gridTheme } from "../grid/theme";
 import { IconButton, Modal, money } from "../ui";
 
@@ -52,6 +53,10 @@ function rowsFor(carId: CarId): Row[] {
 }
 
 const range = (min: number, max: number) => (max > 0 ? (min === max ? money(min) : `${money(min)}–${money(max)}`) : "—");
+/** The typical (midpoint) price: what the price columns filter, sort and total on. 0 = not sold. */
+const mid = (min: number, max: number) => (max > 0 ? Math.round((min + max) / 2) : 0);
+/** Aggregates arrive as numbers or, for avg, as { value }. */
+const aggNumber = (v: unknown) => (typeof v === "number" ? v : typeof v === "object" && v && "value" in v ? Number((v as { value: unknown }).value) : NaN);
 
 function PartCell({ data }: ICellRendererParams<Row>) {
   if (!data) return null;
@@ -67,13 +72,21 @@ function PartCell({ data }: ICellRendererParams<Row>) {
   );
 }
 
-function RangeCell({ value, data, strong }: ICellRendererParams<Row> & { strong?: boolean }) {
+function RangeCell({ value, data, node, strong, of }: ICellRendererParams<Row> & { strong?: boolean; of: (d: Row) => [number, number] }) {
+  if (node.group) {
+    const n = aggNumber(value);
+    return Number.isFinite(n) ? <span className={clsx("num w-full text-right", strong ? "font-semibold text-ink" : "text-ink/85")}>{money(Math.round(n))}</span> : null;
+  }
   if (!data) return null;
-  const [min, max] = value as [number, number];
+  const [min, max] = of(data);
   return <span className={clsx("num w-full text-right", strong ? "font-semibold text-ink" : max > 0 ? "text-ink/85" : "text-faint")}>{range(min, max)}</span>;
 }
 
-function DiyCell({ data }: ICellRendererParams<Row>) {
+function DiyCell({ data, node, value }: ICellRendererParams<Row>) {
+  if (node.group) {
+    const n = aggNumber(value);
+    return Number.isFinite(n) ? <span className="num text-muted">{n.toFixed(1)}/5</span> : null;
+  }
   if (!data) return null;
   const color = data.diy >= 4 ? "var(--danger)" : data.diy >= 3 ? "var(--warn)" : "var(--ok)";
   return (
@@ -98,8 +111,41 @@ function ActionsCell({ data, context }: ICellRendererParams<Row, unknown, { pick
   );
 }
 
-/** Sort ranges by their midpoint; unsold parts go last. */
-const byMid = (a: [number, number], b: [number, number]) => (a[1] ? (a[0] + a[1]) / 2 : -1) - (b[1] ? (b[0] + b[1]) / 2 : -1);
+const PRICE_AGG = ["avg", "min", "max", "sum"];
+const priceCol = (colId: string, headerName: string, of: (d: Row) => [number, number], extra: ColDef<Row> = {}, strong = false): ColDef<Row> => ({
+  colId,
+  headerName,
+  valueGetter: ({ data }) => (data ? mid(...of(data)) : null),
+  cellRenderer: RangeCell,
+  cellRendererParams: { of, strong },
+  // Unsold parts (0) go last whichever way it's sorted.
+  comparator: (a: number, b: number, _na, _nb, desc) => (!a === !b ? a - b : !a ? (desc ? -1 : 1) : desc ? 1 : -1),
+  filter: "agNumberColumnFilter",
+  enableValue: true,
+  allowedAggFuncs: PRICE_AGG,
+  flex: 1,
+  minWidth: 120,
+  headerClass: "ag-right-aligned-header",
+  getQuickFilterText: () => "",
+  ...extra,
+});
+
+// Filters are there for Ask; the header shows a filter icon only while one is active.
+const DEFAULT_COL: ColDef<Row> = { sortable: true, resizable: true, suppressMovable: true, suppressHeaderFilterButton: true };
+
+/** Column descriptions the "Ask" model reads with the grid's schema. */
+const ASK_COLUMNS: StructuredSchemaParams["columns"] = {
+  part: { description: "Part name" },
+  price: { description: "Typical part price in USD (midpoint of the range); 0 = not sold as a part" },
+  labor: { description: "Typical shop labor in USD to replace it" },
+  total: { description: "Typical total repair cost in USD, part plus labor" },
+  diy: { description: "How hard to replace at home: 1 easy, 2 basic tools, 3 moderate, 4 advanced, 5 shop only" },
+  life: { description: "Typical lifespan, free text" },
+  system: { description: "Car system the part belongs to", includeSetValues: true },
+  store: { description: "Whether the in-app store sells this part", includeSetValues: true },
+  partMax: { description: "Highest part price in USD (use for 'under $X'); 0 = not sold" },
+  symptoms: { description: "Symptoms a failing part causes, free text" },
+};
 
 /** AG Grid parts price guide. Rows drive the 3D view: hover outlines the part, click flies to it. */
 export function PriceGuide() {
@@ -138,19 +184,20 @@ function GuideBody({ docked, onClose }: { docked: boolean; onClose: () => void }
 
   const columns = useMemo<ColDef<Row>[]>(() => [
     {
-      colId: "part", headerName: "Part", field: "name", flex: 2, minWidth: 180, cellRenderer: PartCell,
+      colId: "part", headerName: "Part", field: "name", flex: 2, minWidth: 180, cellRenderer: PartCell, filter: "agTextColumnFilter",
       getQuickFilterText: ({ data }) => `${data.name} ${SYSTEM_META[data.system].label} ${data.symptoms.join(" ")}`,
     },
-    { colId: "price", headerName: "Part price", valueGetter: ({ data }) => (data ? [data.partMin, data.partMax] : [0, 0]), comparator: byMid, cellRenderer: RangeCell, flex: 1, minWidth: 120, headerClass: "ag-right-aligned-header", getQuickFilterText: () => "" },
-    { colId: "labor", headerName: "Labor", valueGetter: ({ data }) => (data ? [data.laborMin, data.laborMax] : [0, 0]), comparator: byMid, cellRenderer: RangeCell, flex: 1, minWidth: 120, headerClass: "ag-right-aligned-header", getQuickFilterText: () => "" },
-    {
-      colId: "total", headerName: "Total", headerTooltip: "Typical repair: part plus shop labor",
-      valueGetter: ({ data }) => (data ? [data.partMin + data.laborMin, data.partMax + data.laborMax] : [0, 0]),
-      comparator: byMid, cellRenderer: RangeCell, cellRendererParams: { strong: true }, flex: 1.1, minWidth: 136, headerClass: "ag-right-aligned-header", getQuickFilterText: () => "",
-    },
-    { colId: "diy", headerName: "DIY", field: "diy", cellRenderer: DiyCell, width: 92, minWidth: 92, headerTooltip: "How hard the job is at home, from easy to shop only", getQuickFilterText: () => "" },
-    { colId: "life", headerName: "Typical life", field: "lifespan", flex: 1.2, minWidth: 130, cellClass: "text-muted", tooltip: true },
+    priceCol("price", "Part price", (d) => [d.partMin, d.partMax]),
+    priceCol("labor", "Labor", (d) => [d.laborMin, d.laborMax]),
+    priceCol("total", "Total", (d) => [d.partMin + d.laborMin, d.partMax + d.laborMax], { headerTooltip: "Typical repair: part plus shop labor", flex: 1.1, minWidth: 136 }, true),
+    { colId: "diy", headerName: "DIY", field: "diy", cellRenderer: DiyCell, width: 92, minWidth: 92, headerTooltip: "How hard the job is at home, from easy to shop only", filter: "agNumberColumnFilter", enableValue: true, allowedAggFuncs: ["avg", "min", "max"], getQuickFilterText: () => "" },
+    { colId: "life", headerName: "Typical life", field: "lifespan", flex: 1.2, minWidth: 130, cellClass: "text-muted", tooltip: true, filter: "agTextColumnFilter" },
     { colId: "actions", headerName: "", width: 84, minWidth: 84, sortable: false, resizable: false, cellRenderer: ActionsCell, cellStyle: { paddingLeft: 4, paddingRight: 8 }, getQuickFilterText: () => "" },
+    // Hidden: what "Ask" filters and groups on.
+    { colId: "system", headerName: "System", field: "system", hide: true, filter: "agSetColumnFilter", enableRowGroup: true, valueFormatter: ({ value }) => SYSTEM_META[value as SystemId]?.label ?? value, getQuickFilterText: () => "" },
+    { colId: "store", headerName: "In store", valueGetter: ({ data }) => (data?.sold ? "sold" : "not sold"), hide: true, filter: "agSetColumnFilter", enableRowGroup: true, getQuickFilterText: () => "" },
+    { colId: "partMax", headerName: "Highest part price", field: "partMax", hide: true, filter: "agNumberColumnFilter", getQuickFilterText: () => "" },
+    { colId: "symptoms", headerName: "Symptoms", valueGetter: ({ data }) => data?.symptoms.join("; ") ?? "", hide: true, filter: "agTextColumnFilter", getQuickFilterText: () => "" },
   ], []);
 
   // Apply the system and in-store filters.
@@ -195,13 +242,20 @@ function GuideBody({ docked, onClose }: { docked: boolean; onClose: () => void }
         </div>
         <IconButton label="Close price guide" onClick={onClose} className="ml-auto h-9 w-9 sm:ml-0"><X size={17} /></IconButton>
       </header>
+      <GridAsk
+        grid="parts"
+        api={() => grid.current?.api as GridApi | undefined}
+        columns={ASK_COLUMNS}
+        placeholder="Ask: brake parts I can DIY under $100, cheapest first"
+        className="shrink-0 border-b border-line px-3 py-2"
+      />
       <div className="ag-theme-crankwell relative min-h-0 flex-1" onMouseLeave={() => useScene.getState().hover(null)}>
         <AgGridReact<Row>
           ref={grid}
           theme={gridTheme}
           rowData={rows}
           columnDefs={columns}
-          defaultColDef={{ sortable: true, resizable: true, suppressMovable: true }}
+          defaultColDef={DEFAULT_COL}
           getRowId={({ data }: GetRowIdParams<Row>) => data.id}
           context={{ pick, carId }}
           quickFilterText={query}
@@ -221,7 +275,13 @@ function GuideBody({ docked, onClose }: { docked: boolean; onClose: () => void }
             if (key === "Enter" && e.data) pick(e.data.id);
           }}
           onCellMouseOver={(e) => { if (docked && e.data) useScene.getState().hover(e.data.id, true); }}
-          onModelUpdated={(e) => setShown(e.api.getDisplayedRowCount())}
+          onModelUpdated={(e) => {
+            let n = 0;
+            e.api.forEachNodeAfterFilter((node) => void (node.group || n++));
+            setShown(n);
+          }}
+          autoGroupColumnDef={{ headerName: "Group", minWidth: 190, flex: 1.4 }}
+          suppressAggFuncInHeader
           tooltipShowDelay={400}
           animateRows
           suppressNoRowsOverlay

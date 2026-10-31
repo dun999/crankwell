@@ -19,6 +19,8 @@ const STATUS: Record<TxStatus, { label: string; tone: "ok" | "warn" | "muted" | 
   CANCELLED: { label: "Cancelled", tone: "muted" },
 };
 
+export const statusLabel = (s: string) => STATUS[s as TxStatus]?.label ?? s;
+
 export function StatusPill({ status, press }: { status: TxStatus; press?: boolean }) {
   const s = STATUS[status];
   const color = { ok: "var(--ok)", warn: "var(--warn)", muted: "var(--muted)", danger: "var(--danger)", accent: "var(--accent)" }[s.tone];
