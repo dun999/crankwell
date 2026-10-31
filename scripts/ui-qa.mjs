@@ -5,6 +5,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { chromium } from "playwright-core";
 
 const url = process.argv[2] ?? "http://localhost:3000";
+// The app; "/" is the landing page, whose exploded car leaves the frame on purpose.
+const app = new URL("/app", url).href;
 const out = process.argv[3] ?? "/tmp/crankwell-ui-qa";
 await mkdir(out, { recursive: true });
 const browser = await chromium.launch({
@@ -22,7 +24,7 @@ async function prepare(page) {
     contentType: "text/event-stream",
     body: 'event: text\ndata: {"delta":"A weak **12 V battery** could explain the clicking. Keep the car parked while checking."}\n\nevent: done\ndata: {"stopReason":"stop"}\n\n',
   }));
-  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.goto(app, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => window.__ready && window.__three, null, { timeout: 120_000 });
   await page.waitForTimeout(1800);
 }
@@ -245,7 +247,7 @@ try {
   });
   await fallback.route("**/api/orders?*", (r) => r.fulfill({ json: { items: [] } }));
   await fallback.route("**/api/events?*", (r) => r.fulfill({ contentType: "text/event-stream", body: ": ready\n\n" }));
-  await fallback.goto(url);
+  await fallback.goto(app);
   await fallback.getByText("3D viewing is unavailable", { exact: true }).waitFor();
   await fallback.getByRole("button", { name: "Search parts (Ctrl+K)", exact: true }).click();
   await fallback.getByRole("textbox", { name: "Search parts, actions or ask the mechanic", exact: true }).fill("battery");

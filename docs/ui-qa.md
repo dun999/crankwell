@@ -1,5 +1,7 @@
 # UI review — 10 October 2026
 
+**Re-run 1 November 2026:** every layout (desktop, laptop, tablet, mobile, small, landscape, collapsed chat, keyboard-sized, dark) and every interaction check passes. `pnpm qa:ui` now opens `/app`: since `/` became the landing page, whose exploded car leaves the frame on purpose, the script had been checking the wrong page.
+
 ## Scope and references
 
 Review Crankwell's 3D explorer, parts, diagnostic chat, and checkout entry points across desktop, tablet, and mobile. Preserve the existing car models and commerce behavior.

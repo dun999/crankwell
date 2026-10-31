@@ -1,3 +1,19 @@
+# Performance check — 1 November 2026
+
+The same measurement after the hackathon polish (cookie sessions, LLM failover, after-sale changes,
+Pay Later, spending limits, AG Grid Enterprise): production build of `/app` (the landing page now
+lives at `/`), Chromium at 1440 × 900, `pnpm perf http://localhost:3125/app`.
+
+| Measurement | 8 October | 1 November |
+| --- | ---: | ---: |
+| Initial JavaScript downloaded, decoded | 745,529 bytes | 653,443 bytes |
+| Initial JavaScript transferred | 227,126 bytes | 203,576 bytes |
+| Frames during a five-second idle sample | 0 | 0 |
+| GPU draw calls during that sample | 0 | 0 |
+
+AG Grid Enterprise (Ask, grouping, set filters, master/detail) is one lazy chunk of 1,312 KB decoded,
+366 KB gzipped, fetched only when the price guide or the Orders panel opens.
+
 # Performance update — 8 October 2026
 
 Measured with production builds in Chromium at 1440 × 900, device pixel ratio 1,
