@@ -5,6 +5,7 @@ import { getTemplate } from "@/lib/cars/parts-library";
 import { SYSTEM_IDS, type CarId } from "@/lib/cars/types";
 import { findSku } from "@/lib/catalog/spare-parts";
 import type { Action, Mandate, Transaction } from "@/lib/commerce/types";
+import { publishMandate } from "./bus";
 import { ACTION_TTL_MS, ONE_TAP_DAILY_MAX, ONE_TAP_MAX, cancelAction, confirmAction, oneTapSpentToday, prepareAction } from "./actions";
 import { CommerceError, quoteParts } from "./commerce";
 import { db, serverSecret } from "./db";
@@ -107,6 +108,13 @@ export function getMandate(id: string, sessionId: string): Mandate {
   return view(row, terms);
 }
 
+/** The mandate after a change, also sent to the user's open tabs so its card and Orders update live. */
+function announce(id: string, sessionId: string): Mandate {
+  const m = getMandate(id, sessionId);
+  publishMandate(sessionId, m);
+  return m;
+}
+
 /**
  * The mechanic proposes terms; nothing can be bought until the user approves them. Limits are capped
  * by the one-tap limits, and a saved PayPal is required (that's what pays).
@@ -150,8 +158,8 @@ export function approveMandate(id: string, sessionId: string): Mandate {
   if (!walletVaultId(sessionId)) throw new CommerceError("Save PayPal first. Spending limits pay with it.", 409);
   const at = new Date();
   const next: Terms = { ...terms, approvedAt: at.toISOString(), expiresAt: new Date(at.getTime() + terms.days * 24 * 3600_000).toISOString() };
-  if (!transition(row, next, "proposed", "active", sign(next))) return getMandate(id, sessionId);
-  return getMandate(id, sessionId);
+  transition(row, next, "proposed", "active", sign(next));
+  return announce(id, sessionId);
 }
 
 /** Stop a mandate (or turn down a proposal). Purchases already made stay; each can be refunded. */
@@ -159,7 +167,7 @@ export function revokeMandate(id: string, sessionId: string): Mandate {
   const { row, terms } = owned(id, sessionId);
   if (row.status === "proposed") transition(row, { ...terms, revokedAt: now() }, "proposed", "declined");
   else if (row.status === "active") transition(row, { ...terms, revokedAt: now() }, "active", "revoked");
-  return getMandate(id, sessionId);
+  return announce(id, sessionId);
 }
 
 export function revokeAllMandates(sessionId: string): Mandate[] {
@@ -212,7 +220,7 @@ export async function buyWithinMandate(
       release(fits.row.id, amountCents);
       return { ...r, mandate: getMandate(fits.row.id, sessionId) };
     }
-    return { ...r, mandate: getMandate(fits.row.id, sessionId) };
+    return { ...r, mandate: announce(fits.row.id, sessionId) };
   } catch (e) {
     release(fits.row.id, amountCents);
     cancelAction(pending.id, sessionId);

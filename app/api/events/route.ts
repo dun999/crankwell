@@ -1,10 +1,10 @@
-import { subscribeTx } from "@/lib/server/bus";
+import { subscribeMandates, subscribeTx } from "@/lib/server/bus";
 import { sessionFrom } from "@/lib/server/http";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** Server-Sent Events: live transaction updates (webhooks, captures) for this browser's session. */
+/** Server-Sent Events: live transaction updates (webhooks, captures) and spending-limit changes for this browser's session. */
 export async function GET(req: Request) {
   const session = sessionFrom(req);
   if (!session) return new Response("no session", { status: 401 });
@@ -20,11 +20,13 @@ export async function GET(req: Request) {
         }
       };
       send(": connected\n\n");
-      const unsub = subscribeTx(session, (tx) => send(`event: tx\ndata: ${JSON.stringify(tx)}\n\n`));
+      const unsubTx = subscribeTx(session, (tx) => send(`event: tx\ndata: ${JSON.stringify(tx)}\n\n`));
+      const unsubMandates = subscribeMandates(session, (m) => send(`event: mandate\ndata: ${JSON.stringify(m)}\n\n`));
       const ping = setInterval(() => send(": ping\n\n"), 20_000);
       cleanup = () => {
         clearInterval(ping);
-        unsub();
+        unsubTx();
+        unsubMandates();
       };
       req.signal.addEventListener("abort", () => {
         cleanup();

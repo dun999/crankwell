@@ -15,7 +15,7 @@ const STATUS: Record<TxStatus, { label: string; tone: "ok" | "warn" | "muted" | 
   DRAFT: { label: "Draft", tone: "muted" },
   SENT: { label: "Invoice sent", tone: "accent" },
   UNPAID: { label: "Unpaid", tone: "warn" },
-  PAID: { label: "Paid", tone: "ok" },
+  PAID: { label: "Invoice paid", tone: "ok" },
   CANCELLED: { label: "Cancelled", tone: "muted" },
 };
 

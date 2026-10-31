@@ -1,6 +1,6 @@
 "use client";
 import { create } from "zustand";
-import type { Transaction, WalletInfo } from "@/lib/commerce/types";
+import type { Mandate, Transaction, WalletInfo } from "@/lib/commerce/types";
 import { sessionReady } from "@/lib/session";
 
 interface OrdersState {
@@ -9,6 +9,9 @@ interface OrdersState {
   /** Saved PayPal for one-tap, and apps (Claude) connected to this browser. */
   wallet: WalletInfo | null;
   connections: { client: string }[];
+  /** Spending limits as the server last reported them, by id. The chat cards show these. */
+  mandates: Record<string, Mandate>;
+  putMandate: (m: Mandate) => void;
   refreshWallet: () => Promise<void>;
   forget: (what: "wallet" | "connections") => Promise<void>;
   /** last update notice for toasts */
@@ -38,6 +41,8 @@ export const useOrders = create<OrdersState>((set, get) => ({
   flash: null,
   wallet: null,
   connections: [],
+  mandates: {},
+  putMandate: (m) => set((s) => ({ mandates: { ...s.mandates, [m.id]: m } })),
   refreshWallet: async () => {
     await sessionReady();
     const r = await fetch("/api/wallet");
@@ -73,6 +78,14 @@ export const useOrders = create<OrdersState>((set, get) => ({
           const tx = JSON.parse((e as MessageEvent).data) as Transaction;
           get().upsert(tx, true);
           if (tx.status === "COMPLETED" || tx.status === "AUTHORIZED") void get().refreshWallet();
+        } catch {
+          /* ignore malformed */
+        }
+      });
+      // A purchase or revoke by the mechanic, or a revoke in Orders.
+      es.addEventListener("mandate", (e) => {
+        try {
+          get().putMandate(JSON.parse((e as MessageEvent).data) as Mandate);
         } catch {
           /* ignore malformed */
         }

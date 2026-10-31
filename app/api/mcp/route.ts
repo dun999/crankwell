@@ -49,7 +49,7 @@ async function serve(req: Request) {
   const auth = token ? verifyAccessToken(token) : null;
 
   if (!auth && (await needsAuth(req))) {
-    const description = token ? "Your Crankwell connection expired. Connect again." : "Connect Crankwell to check out with PayPal";
+    const description = token ? "Your Crankwell connection expired or was disconnected. Connect again." : "Connect Crankwell to check out with PayPal";
     return withCors(
       Response.json(
         { error: "invalid_token", error_description: description },

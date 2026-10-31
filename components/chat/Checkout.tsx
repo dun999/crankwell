@@ -95,7 +95,7 @@ export function PreparingCheckout({ b, msgId, idx }: { b: Extract<Block, { kind:
 
 const DONE = { parts: "Payment complete", shop_deposit: "Deposit held", technician_invoice: "Invoice sent" };
 const VIA = {
-  vault: "Paid with saved PayPal in one tap",
+  vault: "One tap with saved PayPal",
   approval: "Approved in PayPal",
   invoice: "Sent with PayPal Invoicing",
   change: "Done with PayPal from the chat",

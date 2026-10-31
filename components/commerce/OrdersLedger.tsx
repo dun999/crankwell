@@ -103,7 +103,7 @@ export function moneyFlow(tx: Transaction): Flow[] {
   for (const it of tx.items ?? []) out.push({ id: `item-${it.sku}`, what: `${it.name} × ${it.quantity}`, amount: Number(it.unitPrice) * it.quantity });
   if (p.authorizationId) out.push({ id: "auth", what: tx.status === "VOIDED" ? "Hold released" : "Hold authorized", amount, ref: p.authorizationId });
   if (p.captureId) out.push({ id: "capture", what: tx.kind === "technician_invoice" ? "Invoice paid" : tx.kind === "shop_deposit" ? "Captured at check-in" : "Captured", amount, ref: p.captureId });
-  else if (p.invoiceNumber) out.push({ id: "invoice", what: `Invoice · ${statusLabel(tx.status).toLowerCase()}`, amount, ref: p.invoiceNumber });
+  else if (p.invoiceNumber) out.push({ id: "invoice", what: `Invoice · ${statusLabel(tx.status).toLowerCase().replace(/^invoice /, "")}`, amount, ref: p.invoiceNumber });
   else if (p.orderId) out.push({ id: "order", what: `Order · ${statusLabel(tx.status).toLowerCase()}`, amount, ref: p.orderId });
   if (p.refundId) out.push({ id: "refund", what: tx.job ? "Unused labor refunded to you" : "Refunded to you", amount: -(tx.job ? Number(tx.job.refunded) : amount), ref: p.refundId });
   if (tx.payout) {

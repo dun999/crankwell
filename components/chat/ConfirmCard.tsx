@@ -31,6 +31,9 @@ export function ConfirmCard({ e }: { e: ActionEvent }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const wallet = useOrders((s) => s.wallet);
+  // The payment can finish without this card: PayPal's webhook or the reconciler completes an approval
+  // the browser never reported back. The order's live update is the cue to ask again.
+  const txStatus = useOrders((s) => s.items.find((t) => t.meta?.actionId === e.action.id)?.status);
 
   // The card may be rendered again from saved chat history, so ask the server where it stands.
   useEffect(() => {
@@ -52,7 +55,7 @@ export function ConfirmCard({ e }: { e: ActionEvent }) {
     return () => {
       live = false;
     };
-  }, [e.action.id, e.action.kind, wallet]);
+  }, [e.action.id, e.action.kind, wallet, txStatus]);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -113,7 +116,7 @@ export function ConfirmCard({ e }: { e: ActionEvent }) {
         ) : oneTap ? (
           <div className="space-y-1.5">
             <Button variant="primary" className="h-11 w-full text-[14px]" disabled={busy} onClick={confirm}>
-              {busy ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />} Confirm · pay ${Number(action.amount).toFixed(2)}
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />} Confirm · {action.kind === "shop_deposit" ? "hold" : "pay"} ${Number(action.amount).toFixed(2)}
             </Button>
             <p className="text-center text-[11px] text-muted">One tap with your saved PayPal{wallet?.email ? ` (${wallet.email})` : ""}</p>
           </div>

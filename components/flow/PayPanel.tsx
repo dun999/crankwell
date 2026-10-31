@@ -131,7 +131,7 @@ export function PayPanel({ initial, notice }: { initial: Action; notice?: { kind
         <>
           {oneTap && (
             <Button variant="primary" className="h-12 w-full text-[15px]" disabled={!!busy} onClick={() => run("tap", async () => setS({ ...s, ...(await post<Status>(`/api/actions/${a.id}/confirm`, {})) }))}>
-              {busy === "tap" && <Loader2 size={15} className="animate-spin" />} Pay ${Number(a.amount).toFixed(2)} · one tap
+              {busy === "tap" && <Loader2 size={15} className="animate-spin" />} {a.kind === "shop_deposit" ? "Hold" : "Pay"} ${Number(a.amount).toFixed(2)} · one tap
             </Button>
           )}
           {oneTap && <p className="text-center text-[11.5px] text-muted">Saved PayPal{s.wallet?.email ? ` · ${s.wallet.email}` : ""}</p>}

@@ -26,7 +26,10 @@ export function mandateScope(m: Mandate) {
  * taps Allow; afterwards the card shows what's left and can revoke it.
  */
 export function MandateCard({ e }: { e: MandateEvent }) {
-  const [m, setM] = useState<Mandate>(e.mandate);
+  // The server's latest word on this limit: fetched on mount, returned by a tap, or pushed live when the
+  // mechanic buys within it or revokes it.
+  const m = useOrders((s) => s.mandates[e.mandate.id]) ?? e.mandate;
+  const put = useOrders((s) => s.putMandate);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const wallet = useOrders((s) => s.wallet);
@@ -38,19 +41,19 @@ export function MandateCard({ e }: { e: MandateEvent }) {
       .list()
       .then((all) => {
         const now = all.find((x) => x.id === e.mandate.id);
-        if (live && now) setM(now);
+        if (live && now) put(now);
       })
       .catch(() => {});
     return () => {
       live = false;
     };
-  }, [e.mandate.id]);
+  }, [e.mandate.id, put]);
 
   const run = async (fn: () => Promise<Mandate>) => {
     setBusy(true);
     setErr(null);
     try {
-      setM(await fn());
+      put(await fn());
     } catch (x) {
       setErr((x as Error).message);
     } finally {

@@ -28,6 +28,7 @@ vi.mock("@/lib/server/paypal", () => ({
 }));
 
 const mandates = await import("@/lib/server/mandates");
+const { subscribeMandates } = await import("@/lib/server/bus");
 const actions = await import("@/lib/server/actions");
 const wallet = await import("@/lib/server/wallet");
 const { runTool, TOOLS } = await import("@/lib/agent/tools");
@@ -163,6 +164,9 @@ describe("agent tools", () => {
     const early = await runTool("buy_within_mandate", { sku: pads.sku }, ctx(s, events));
     expect(early).toMatchObject({ isError: true, content: expect.stringMatching(/No active spending limit/) });
 
+    // The open tab hears each change, so the card in the chat follows the mechanic.
+    const pushed: string[] = [];
+    const off = subscribeMandates(s, (m) => pushed.push(`${m.status} ${m.remaining} ${m.purchases}`));
     mandates.approveMandate(events[0].mandate!.id, s);
     const orders = JSON.parse((await runTool("get_orders", {}, ctx(s, events))).content);
     expect(orders.spending_limits).toEqual([expect.objectContaining({ status: "active", systems: ["brakes"], left_usd: "300.00" })]);
@@ -171,8 +175,10 @@ describe("agent tools", () => {
     expect(bought).toMatchObject({ status: "bought", amount_usd: "42.98", limit_left_usd: "257.02" });
     expect(events.at(-1)).toMatchObject({ type: "action", oneTap: true });
 
-    expect(JSON.parse((await runTool("revoke_mandates", {}, ctx(s, events))).content)).toMatchObject({ revoked: 1 });
+    expect(JSON.parse((await runTool("revoke_mandates", {}, ctx(s, events))).content)).toMatchObject({ revoked: 1, bought_under_them: [{ amount_usd: "42.98", status: "COMPLETED" }] });
     expect(mandates.listMandates(s)[0].status).toBe("revoked");
+    off();
+    expect(pushed).toEqual(["active 300.00 0", "active 257.02 1", "revoked 257.02 1"]);
   });
 
   it("are in-app only: Claude over MCP can't buy without a tap", () => {

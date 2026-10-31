@@ -10,7 +10,7 @@ import { findSku, getSpareParts } from "@/lib/catalog/spare-parts";
 import { CHANGE_KINDS } from "@/lib/commerce/ops";
 import type { ActionPayload, RepairShop, SparePart, Technician } from "@/lib/commerce/types";
 import { oneTapBlocker, prepareAction } from "@/lib/server/actions";
-import { CommerceError } from "@/lib/server/commerce";
+import { CommerceError, listTransactions } from "@/lib/server/commerce";
 import { ordersForAgent } from "@/lib/server/reconcile";
 import { buyWithinMandate, proposeMandate, revokeAllMandates } from "@/lib/server/mandates";
 import { SYSTEM_IDS } from "@/lib/cars/types";
@@ -449,7 +449,14 @@ async function exec(name: ToolName, input: unknown, ctx: ToolContext): Promise<u
     case "revoke_mandates": {
       schemas.revoke_mandates.parse(input ?? {});
       const done = revokeAllMandates(ctx.sessionId);
-      return { revoked: done.length, note: done.length ? "No more purchases without the user's tap." : "There were no spending limits." };
+      // What was bought under them, so the reply can state it instead of recalling it.
+      const ids = new Set(done.map((m) => m.id));
+      const bought = listTransactions(ctx.sessionId).filter((t) => ids.has(String(t.meta?.mandateId ?? "")));
+      return {
+        revoked: done.length,
+        bought_under_them: bought.map((t) => ({ title: t.title, amount_usd: t.amount, status: t.status })),
+        note: done.length ? "No more purchases without the user's tap. Mention past purchases only as bought_under_them lists them." : "There were no spending limits.",
+      };
     }
     case "prepare_order_change": {
       const a = schemas.prepare_order_change.parse(input);
