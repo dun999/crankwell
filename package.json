@@ -12,7 +12,8 @@
     "webhook:register": "tsx scripts/register-webhook.ts",
     "shot": "node scripts/shot.mjs",
     "qa:ui": "node scripts/ui-qa.mjs",
-    "perf": "node scripts/perf.mjs"
+    "perf": "node scripts/perf.mjs",
+    "eval": "NODE_OPTIONS=--conditions=react-server tsx scripts/eval.mts"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.4.0",
