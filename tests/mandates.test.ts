@@ -30,6 +30,7 @@ vi.mock("@/lib/server/paypal", () => ({
 const mandates = await import("@/lib/server/mandates");
 const { subscribeMandates } = await import("@/lib/server/bus");
 const actions = await import("@/lib/server/actions");
+const commerce = await import("@/lib/server/commerce");
 const wallet = await import("@/lib/server/wallet");
 const { runTool, TOOLS } = await import("@/lib/agent/tools");
 const { db } = await import("@/lib/server/db");
@@ -88,7 +89,7 @@ describe("buying within a limit", () => {
     expect(pp.createOrder).toHaveBeenCalledWith(expect.objectContaining({ vault: { vaultId: "VAULT-MD" }, intent: "CAPTURE" }));
     expect(r.action).toMatchObject({ status: "confirmed", via: "mandate", mandateId: m.id, amount: "42.98" });
     expect(r.tx?.status).toBe("COMPLETED");
-    expect(r.mandate).toMatchObject({ spent: "42.98", remaining: "157.02", purchases: 1 });
+    expect(r.mandate).toMatchObject({ spent: "42.98", remaining: "157.02", purchases: 1, undone: 0 });
     expect(actions.oneTapSpentToday(s)).toBeCloseTo(42.98);
   });
 
@@ -116,6 +117,17 @@ describe("buying within a limit", () => {
     expect(both.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     expect(pp.createOrder).toHaveBeenCalledTimes(1);
     expect(mandates.getMandate(m.id, s).spent).toBe("42.98");
+  });
+
+  it("gives a purchase's share back once it is refunded (Undo)", async () => {
+    const s = newSession();
+    const m = brakes(s, 50, 60);
+    const r = await buy(s);
+    await expect(buy(s)).rejects.toThrow(/only \$17\.02 of it is left/);
+    await commerce.refund(r.tx!.id, s);
+    expect(mandates.getMandate(m.id, s)).toMatchObject({ spent: "0.00", remaining: "60.00", purchases: 1, undone: 1 });
+    expect((await buy(s)).mandate).toMatchObject({ spent: "42.98", remaining: "17.02", purchases: 2, undone: 1 });
+    await expect(buy(s)).rejects.toThrow(/only \$17\.02 of it is left/);
   });
 
   it("gives the limit back when PayPal fails", async () => {

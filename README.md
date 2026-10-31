@@ -134,7 +134,7 @@ Guardrails (`lib/server/actions.ts`): one-tap is capped at $500 per order and $1
 
 - The approved terms (car, systems, per-order and total limit, expiry) are signed with a server HMAC and checked on every purchase.
 - The spend is reserved with one conditional `UPDATE`, so two purchases can't both use the last of a limit, and released if PayPal declines.
-- Every purchase gets a receipt labeled "Bought by the mechanic within your spending limit" with **Undo · refund**.
+- Every purchase gets a receipt labeled "Bought by the mechanic within your spending limit" with **Undo · refund**. A refunded purchase gives its amount back to the limit, and the card updates live.
 - Limits can be revoked from the card, from the Orders panel or by asking; removing saved PayPal ends them all. Claude over MCP never gets these tools.
 
 ### PayPal Agent Toolkit, scoped to the user
@@ -198,7 +198,7 @@ Two views use AG Grid Enterprise (`ag-grid-enterprise` + `ag-grid-react` v36). B
   - Each row expands (**master/detail**) into its money flow: line items, the capture or hold, refunds, the technician's payout and its fee, each with its PayPal id.
   - **Set filters** on status, type and car, and date filters.
   - **Grouping** with a summed amount.
-  - A **pinned total** over the rows shown.
+  - A **pinned total** over the rows shown: what was paid after refunds, so refunded orders, released holds and cancelled invoices add nothing.
   - **CSV export**.
   - Selecting a row opens its timeline and the actions PayPal allows next.
 

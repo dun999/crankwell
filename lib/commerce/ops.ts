@@ -7,6 +7,15 @@ export const CHANGE_KINDS = ["refund", "check_in", "cancel_reservation", "cancel
 
 export const isChange = (k: ActionKind): k is ChangeKind => (CHANGE_KINDS as readonly string[]).includes(k);
 
+/**
+ * What the buyer paid and still has paid: a refunded order, a released hold or a cancelled invoice
+ * count as $0, and unused labor refunded after a technician visit comes off.
+ */
+export function paidAfterRefunds(tx: Pick<Transaction, "status" | "amount" | "job">): number {
+  if (tx.status !== "COMPLETED" && tx.status !== "CAPTURED" && tx.status !== "PAID") return 0;
+  return Math.round((Number(tx.amount) - Number(tx.job?.refunded ?? 0)) * 100) / 100;
+}
+
 /** What can be done to this order right now. */
 export function allowedOps(tx: Pick<Transaction, "kind" | "status" | "paypal" | "job">): ChangeKind[] {
   switch (tx.kind) {

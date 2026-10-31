@@ -4,7 +4,7 @@ import { ExternalLink, Link2, Receipt, RefreshCw, ShieldAlert, Wallet, Webhook, 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { commerce, mandates } from "@/lib/commerce/client";
-import { allowedOps } from "@/lib/commerce/ops";
+import { allowedOps, paidAfterRefunds } from "@/lib/commerce/ops";
 import type { ChangeKind, Mandate, Transaction } from "@/lib/commerce/types";
 import { useOrders } from "@/lib/store/orders";
 import { Button, IconButton, Modal, money } from "../ui";
@@ -167,16 +167,19 @@ function TxDetail({ tx }: { tx: Transaction }) {
   );
 }
 
+// Paid is net of refunds, so Paid + Refunded is what was charged. A technician visit with unused labor
+// refunded counts in both.
 function totals(items: Transaction[]) {
-  const sum = (pred: (t: Transaction) => boolean) => {
+  const sum = (pred: (t: Transaction) => boolean, value = (t: Transaction) => Number(t.amount)) => {
     const hits = items.filter(pred);
-    return { amount: hits.reduce((n, t) => n + Number(t.amount), 0), count: hits.length };
+    return { amount: hits.reduce((n, t) => n + value(t), 0), count: hits.length };
   };
+  const refunded = (t: Transaction) => (t.status === "REFUNDED" || t.status === "REVERSED" ? Number(t.amount) : Number(t.job?.refunded ?? 0));
   return [
-    { label: "Paid", ...sum((t) => t.status === "COMPLETED" || t.status === "CAPTURED" || t.status === "PAID"), tone: "var(--ok)" },
+    { label: "Paid", ...sum((t) => paidAfterRefunds(t) > 0, paidAfterRefunds), tone: "var(--ok)" },
     { label: "On hold", ...sum((t) => t.status === "AUTHORIZED"), tone: "var(--accent)" },
     { label: "Awaiting payment", ...sum((t) => ["CREATED", "APPROVED", "SENT", "UNPAID"].includes(t.status)), tone: "var(--warn)" },
-    { label: "Refunded", ...sum((t) => t.status === "REFUNDED" || t.status === "REVERSED"), tone: "var(--muted)" },
+    { label: "Refunded", ...sum((t) => refunded(t) > 0, refunded), tone: "var(--muted)" },
   ];
 }
 

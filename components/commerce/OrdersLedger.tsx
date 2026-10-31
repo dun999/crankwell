@@ -4,6 +4,7 @@ import { AgGridReact } from "ag-grid-react";
 import { Download, Webhook } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isCarId, carDisplayName } from "@/lib/cars";
+import { paidAfterRefunds } from "@/lib/commerce/ops";
 import type { Transaction } from "@/lib/commerce/types";
 import { GridAsk } from "../grid/GridAsk";
 import { gridTheme } from "../grid/theme";
@@ -174,17 +175,18 @@ export default function OrdersLedger({ items, selectedId, onSelect }: { items: T
     api.ensureNodeVisible(node);
   }, [selectedId, items]);
 
-  // A pinned total over the rows the filters leave.
+  // A pinned total over the rows the filters leave: what was paid and stays paid, so refunded orders,
+  // released holds and cancelled invoices add nothing.
   const onModelUpdated = useCallback((e: ModelUpdatedEvent<Transaction>) => {
     let n = 0;
     let sum = 0;
     e.api.forEachNodeAfterFilter((node) => {
       if (node.group || !node.data) return;
       n++;
-      sum += Number(node.data.amount);
+      sum += paidAfterRefunds(node.data);
     });
     setTotal((cur) => {
-      const title = `${n} shown`;
+      const title = `${n} shown · paid after refunds`;
       if (n <= 1) return cur.length ? [] : cur;
       if (cur[0]?.title === title && cur[0]?.amount === sum.toFixed(2)) return cur;
       return [{ id: TOTAL_ID, title, amount: sum.toFixed(2), events: [], paypal: {} } as unknown as Transaction];

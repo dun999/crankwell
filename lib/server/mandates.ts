@@ -71,8 +71,19 @@ function liveStatus(row: Row, t: Terms, nowMs = Date.now()): Mandate["status"] {
   return row.status;
 }
 
+/**
+ * Purchases under a mandate that were refunded since (Undo, Orders, or PayPal itself). Their share of
+ * the limit is free again, so `spent_cents` counts what was reserved and this what came back.
+ */
+function refundedUnder(id: string): { cents: number; count: number } {
+  const rows = db().prepare("SELECT data FROM transactions WHERE json_extract(data, '$.meta.mandateId') = ? AND status IN ('REFUNDED', 'REVERSED')").all(id) as { data: string }[];
+  return { cents: rows.reduce((n, r) => n + cents(Number((JSON.parse(r.data) as Transaction).amount)), 0), count: rows.length };
+}
+
 function view(row: Row, terms: Terms): Mandate {
   const purchases = (db().prepare("SELECT COUNT(*) AS n FROM actions WHERE session_id = ? AND json_extract(data, '$.mandateId') = ? AND status = 'confirmed'").get(row.session_id, row.id) as { n: number }).n;
+  const back = refundedUnder(row.id);
+  const spent = Math.max(0, row.spent_cents - back.cents);
   return {
     id: row.id,
     status: liveStatus(row, terms),
@@ -80,8 +91,8 @@ function view(row: Row, terms: Terms): Mandate {
     systems: terms.systems,
     perOrderMax: usd(terms.perOrderCents),
     totalMax: usd(terms.totalCents),
-    spent: usd(row.spent_cents),
-    remaining: usd(Math.max(0, terms.totalCents - row.spent_cents)),
+    spent: usd(spent),
+    remaining: usd(Math.max(0, terms.totalCents - spent)),
     days: terms.days,
     reason: terms.reason,
     createdAt: terms.createdAt,
@@ -89,6 +100,7 @@ function view(row: Row, terms: Terms): Mandate {
     approvedAt: terms.approvedAt,
     revokedAt: terms.revokedAt,
     purchases,
+    undone: back.count,
   };
 }
 
@@ -197,20 +209,23 @@ export async function buyWithinMandate(
   const system = getTemplate(sp.template).system;
 
   const rows = db().prepare("SELECT * FROM mandates WHERE session_id = ? AND status = 'active' ORDER BY created_at DESC").all(sessionId) as Row[];
-  const usable = rows.map((row) => ({ row, terms: JSON.parse(row.terms) as Terms })).filter(({ row, terms }) => liveStatus(row, terms) === "active");
+  const usable = rows
+    .map((row) => ({ row, terms: JSON.parse(row.terms) as Terms, back: refundedUnder(row.id).cents }))
+    .filter(({ row, terms }) => liveStatus(row, terms) === "active");
   if (!usable.length) throw new CommerceError("No active spending limit. Ask the user to approve one, or prepare a checkout card instead.", 403);
   const why: string[] = [];
-  const fits = usable.find(({ row, terms }) => {
+  const fits = usable.find(({ row, terms, back }) => {
     if (!signatureValid(row, terms)) return void why.push("its terms failed verification");
     if (terms.carId !== sp.carId) return void why.push(`it covers the ${terms.carId}, not this car`);
     if (!terms.systems.includes(system)) return void why.push(`it covers ${terms.systems.join(", ")}, not ${system}`);
     if (amountCents > terms.perOrderCents) return void why.push(`$${usd(amountCents)} is over its $${usd(terms.perOrderCents)} per order`);
-    if (row.spent_cents + amountCents > terms.totalCents) return void why.push(`only $${usd(terms.totalCents - row.spent_cents)} of it is left`);
+    if (row.spent_cents - back + amountCents > terms.totalCents) return void why.push(`only $${usd(terms.totalCents - (row.spent_cents - back))} of it is left`);
     return true;
   });
   if (!fits) throw new CommerceError(`Not covered by the user's spending limit: ${why.join("; ")}. Prepare a checkout card instead.`, 403);
   if (oneTapSpentToday(sessionId) + q.total > ONE_TAP_DAILY_MAX) throw new CommerceError(`Over the $${ONE_TAP_DAILY_MAX} a day one-tap limit. Prepare a checkout card instead.`, 403);
-  if (!reserve(fits.row.id, amountCents, fits.terms.totalCents)) throw new CommerceError("The spending limit was just used up. Prepare a checkout card instead.", 409);
+  // Refunds only ever grow, so the cap may lag one behind but never lets a purchase over the limit.
+  if (!reserve(fits.row.id, amountCents, fits.terms.totalCents + fits.back)) throw new CommerceError("The spending limit was just used up. Prepare a checkout card instead.", 409);
 
   const pending = prepareAction(sessionId, { kind: "parts", carId: sp.carId, partId: sp.partId, items: [{ sku: sp.sku, quantity: input.quantity }] }, { source: "app" });
   try {

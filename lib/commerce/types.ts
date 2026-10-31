@@ -229,6 +229,8 @@ export interface Mandate {
   approvedAt?: string;
   revokedAt?: string;
   purchases: number;
+  /** Purchases refunded since; their amount is back in the limit. */
+  undone: number;
 }
 
 /** Saved PayPal for one-tap, as the browser sees it (the vault token stays on the server). */

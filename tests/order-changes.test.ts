@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getShop } from "@/lib/catalog/providers";
 import { getSpareParts } from "@/lib/catalog/spare-parts";
-import { allowedOps } from "@/lib/commerce/ops";
+import { allowedOps, paidAfterRefunds } from "@/lib/commerce/ops";
 import type { Transaction } from "@/lib/commerce/types";
 
 const SLOT = getShop("shop_precision_brake")!.nextSlots[0];
@@ -67,6 +67,15 @@ describe("allowedOps", () => {
     expect(allowedOps(tx("technician_invoice", "PAID"))).toEqual(["complete_job"]);
     expect(allowedOps({ ...tx("technician_invoice", "PAID"), job: { completedAt: "", hours: 1, estimatedHours: 1, refunded: "0.00" } })).toEqual([]);
     expect(allowedOps(tx("parts", "COMPLETED", {}))).toEqual([]);
+  });
+
+  it("counts only money that stays paid in the ledger total", () => {
+    expect(paidAfterRefunds({ status: "COMPLETED", amount: "70.98" })).toBe(70.98);
+    expect(paidAfterRefunds({ status: "REFUNDED", amount: "70.98" })).toBe(0);
+    expect(paidAfterRefunds({ status: "VOIDED", amount: "25.00" })).toBe(0);
+    expect(paidAfterRefunds({ status: "CANCELLED", amount: "119.00" })).toBe(0);
+    expect(paidAfterRefunds({ status: "AUTHORIZED", amount: "25.00" })).toBe(0);
+    expect(paidAfterRefunds({ status: "PAID", amount: "249.00", job: { completedAt: "", hours: 1, estimatedHours: 2, refunded: "95.00" } })).toBe(154);
   });
 });
 

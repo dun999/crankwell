@@ -14,9 +14,12 @@ type MandateEvent = Extract<UiEvent, { type: "mandate" }>;
 const money = (v: string) => `$${Number(v).toFixed(2)}`;
 const until = (iso: string) => new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" });
 
-/** What a spending limit covers, in words: "Brakes and Suspension parts for your Corolla". */
+// "Brake parts", not "Brakes parts".
+const AS_NOUN: Partial<Record<SystemId, string>> = { brakes: "Brake" };
+
+/** What a spending limit covers, in words: "Brake and Suspension parts for your Corolla". */
 export function mandateScope(m: Mandate) {
-  const systems = m.systems.map((s) => SYSTEM_META[s as SystemId]?.label ?? s);
+  const systems = m.systems.map((s) => AS_NOUN[s as SystemId] ?? SYSTEM_META[s as SystemId]?.label ?? s);
   const list = systems.length > 1 ? `${systems.slice(0, -1).join(", ")} and ${systems.at(-1)}` : systems[0];
   return `${list} parts for your ${isCarId(m.carId) ? carDisplayName(m.carId) : m.carId}`;
 }
@@ -33,6 +36,8 @@ export function MandateCard({ e }: { e: MandateEvent }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const wallet = useOrders((s) => s.wallet);
+  // An Undo (or any refund) of a purchase under this limit gives its amount back: ask again.
+  const bought = useOrders((s) => s.items.filter((t) => t.meta?.mandateId === e.mandate.id).map((t) => t.status).join());
 
   // Rendered again from chat history: ask the server where it stands now.
   useEffect(() => {
@@ -47,7 +52,7 @@ export function MandateCard({ e }: { e: MandateEvent }) {
     return () => {
       live = false;
     };
-  }, [e.mandate.id, put]);
+  }, [e.mandate.id, put, bought]);
 
   const run = async (fn: () => Promise<Mandate>) => {
     setBusy(true);
@@ -109,7 +114,7 @@ export function MandateCard({ e }: { e: MandateEvent }) {
         ) : m.status === "active" ? (
           <div className="flex items-center gap-2">
             <span className="text-[11.5px] text-muted">
-              {m.purchases ? `${m.purchases} purchase${m.purchases === 1 ? "" : "s"} so far` : "No purchases yet"}
+              {m.purchases ? `${m.purchases} purchase${m.purchases === 1 ? "" : "s"} so far${m.undone ? ` · ${m.undone} undone` : ""}` : "No purchases yet"}
             </span>
             <Button size="sm" variant="secondary" className="ml-auto" disabled={busy} onClick={() => run(() => mandates.revoke(m.id))}>
               Revoke
