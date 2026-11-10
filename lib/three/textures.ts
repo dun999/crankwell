@@ -173,7 +173,7 @@ export function plateTexture() {
   g.fillText("CALIFORNIA", 256, 62);
   g.fillStyle = "#111827";
   g.font = "bold 118px ui-monospace, monospace";
-  g.fillText("FIX CAR", 256, 196);
+  g.fillText("CRNKWLL", 256, 196);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;

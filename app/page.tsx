@@ -11,5 +11,7 @@ export default function Home() {
   // Judges need a sandbox buyer to try checkout; shown only when configured.
   const email = process.env.SANDBOX_BUYER_EMAIL;
   const password = process.env.SANDBOX_BUYER_PASSWORD;
-  return <Landing sandbox={email && password ? { email, password } : null} agent={{ label: MODEL_LABEL, provider: PROVIDER }} />;
+  // The address to paste into Claude as a connector.
+  const mcpUrl = `${(process.env.PUBLIC_URL ?? "https://crankwell.xyz").replace(/\/$/, "")}/api/mcp`;
+  return <Landing sandbox={email && password ? { email, password } : null} agent={{ label: MODEL_LABEL, provider: PROVIDER }} mcpUrl={mcpUrl} />;
 }

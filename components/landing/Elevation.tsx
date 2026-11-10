@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { CAR_SPECS } from "@/lib/cars/specs";
 import type { CarId } from "@/lib/cars/types";
 
@@ -9,6 +10,10 @@ const mm = (m: number) => Math.round(m * 1000).toLocaleString("en-US").replace("
 export function Elevation({ carId = "corolla", className }: { carId?: CarId; className?: string }) {
   const spec = CAR_SPECS[carId];
   const { body, dims } = spec;
+  // The drawing can be on the page more than once: ids are per instance.
+  const uid = useId();
+  const clip = `sill-${uid}`;
+  const arrow = `arw-${uid}`;
   const wheels = [-dims.wheelbase / 2, dims.wheelbase / 2];
   const arch = dims.tireRadius + body.archGap + 0.03;
   const sill = Math.max(...body.edge.map(([, y]) => y));
@@ -34,10 +39,10 @@ export function Elevation({ carId = "corolla", className }: { carId?: CarId; cla
   return (
     <svg viewBox="-280 -190 580 262" className={className} role="img" aria-label={`Side elevation of the ${spec.make} ${spec.model}: length ${mm(dims.length)} mm, wheelbase ${mm(dims.wheelbase)} mm, height ${mm(dims.height)} mm`}>
       <defs>
-        <clipPath id={`above-sill-${carId}`}>
+        <clipPath id={clip}>
           <rect x="-300" y="-300" width="600" height={300 - sill * S} />
         </clipPath>
-        <marker id="arw" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <marker id={arrow} viewBox="0 0 8 8" refX="4" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M0,1 L6,4 L0,7" fill="none" stroke="currentColor" strokeWidth="1" />
         </marker>
       </defs>
@@ -55,7 +60,7 @@ export function Elevation({ carId = "corolla", className }: { carId?: CarId; cla
           <line key={`d${x}`} x1={x * S} x2={x * S} y1={-beltAt(x) * S} y2={-(sill + 0.04) * S} strokeOpacity="0.4" strokeDasharray="3 2" vectorEffect="non-scaling-stroke" />
         ))}
         {/* wheel arches cut into the body above the sill */}
-        <g clipPath={`url(#above-sill-${carId})`}>
+        <g clipPath={`url(#${clip})`}>
           {wheels.map((x) => <circle key={x} cx={x * S} cy={-dims.tireRadius * S} r={arch * S} className="fill-[var(--bg)]" vectorEffect="non-scaling-stroke" />)}
         </g>
         {/* wheels */}
@@ -73,12 +78,12 @@ export function Elevation({ carId = "corolla", className }: { carId?: CarId; cla
         <g strokeOpacity="0.55">
           <line x1={x0} x2={x0} y1="4" y2={dimLen + 4} vectorEffect="non-scaling-stroke" />
           <line x1={x1} x2={x1} y1="4" y2={dimLen + 4} vectorEffect="non-scaling-stroke" />
-          <line x1={x0} x2={x1} y1={dimLen} y2={dimLen} markerStart="url(#arw)" markerEnd="url(#arw)" vectorEffect="non-scaling-stroke" />
+          <line x1={x0} x2={x1} y1={dimLen} y2={dimLen} markerStart={`url(#${arrow})`} markerEnd={`url(#${arrow})`} vectorEffect="non-scaling-stroke" />
           <line x1={wheels[0] * S} x2={wheels[0] * S} y1="6" y2={dimWb + 4} vectorEffect="non-scaling-stroke" />
           <line x1={wheels[1] * S} x2={wheels[1] * S} y1="6" y2={dimWb + 4} vectorEffect="non-scaling-stroke" />
-          <line x1={wheels[0] * S} x2={wheels[1] * S} y1={dimWb} y2={dimWb} markerStart="url(#arw)" markerEnd="url(#arw)" vectorEffect="non-scaling-stroke" />
+          <line x1={wheels[0] * S} x2={wheels[1] * S} y1={dimWb} y2={dimWb} markerStart={`url(#${arrow})`} markerEnd={`url(#${arrow})`} vectorEffect="non-scaling-stroke" />
           <line x1={x1 + 6} x2={xH + 4} y1={hTop} y2={hTop} vectorEffect="non-scaling-stroke" />
-          <line x1={xH} x2={xH} y1="0" y2={hTop} markerStart="url(#arw)" markerEnd="url(#arw)" vectorEffect="non-scaling-stroke" />
+          <line x1={xH} x2={xH} y1="0" y2={hTop} markerStart={`url(#${arrow})`} markerEnd={`url(#${arrow})`} vectorEffect="non-scaling-stroke" />
         </g>
       </g>
       <g fill="currentColor" className="font-mono" fontSize="9" letterSpacing="0.6">

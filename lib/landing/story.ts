@@ -1,7 +1,7 @@
 "use client";
 import { create } from "zustand";
 import type { UiEvent } from "@/lib/agent/events";
-import type { CarId } from "@/lib/cars/types";
+import type { CarId, SystemId } from "@/lib/cars/types";
 import { applyUiEvent } from "@/lib/store/chat";
 import { useScene } from "@/lib/store/scene";
 
@@ -41,9 +41,19 @@ export const CHAPTERS = [
   { id: "pay", label: "Fix & pay", caption: "Fig. 6 — Replacement · brake master cylinder" },
 ] as const;
 
-export const useStory = create<{ step: number; touring: boolean }>(() => ({ step: 0, touring: false }));
+/** The hero's examples: the page types a symptom, and the model shows where it would look. */
+export const EXAMPLES: { text: string; chip: string; system: SystemId }[] = [
+  { text: "My brake pedal feels soft and sinks to the floor", chip: "Soft brake pedal", system: "brakes" },
+  { text: "Car won't start, it just clicks", chip: "Won't start", system: "electrical" },
+  { text: "Engine temperature is going into the red", chip: "Overheating", system: "cooling" },
+  { text: "Steering wheel shakes above 60 mph", chip: "Shakes at speed", system: "wheels" },
+];
+
+export const useStory = create<{ step: number; touring: boolean; finding: SystemId | null }>(() => ({ step: 0, touring: false, finding: null }));
 
 const INTRO_KEY = "crankwell.intro";
+/** While the car is still flying together, the hero's examples wait. */
+let introUntil = 0;
 let timers: ReturnType<typeof setTimeout>[] = [];
 const later = (ms: number, fn: () => void) => timers.push(setTimeout(fn, ms));
 const clearTimers = () => {
@@ -68,6 +78,7 @@ export function startIntro(reducedMotion: boolean) {
     try {
       sessionStorage.setItem(INTRO_KEY, "1");
     } catch {}
+    introUntil = performance.now() + 3200;
     later(500, () => useStory.getState().step === 0 && useScene.getState().setExplode(0, null));
     later(2900, () => useStory.getState().step === 0 && applyStep(0));
   };
@@ -82,12 +93,31 @@ export function startIntro(reducedMotion: boolean) {
 
 export function stopStory() {
   clearTimers();
+  useStory.setState({ finding: null });
   useScene.getState().resetScene();
+}
+
+/**
+ * The hero, live: a typed symptom turns the body to glass and leaves its system solid (null puts the
+ * car back). Only at the top of the page, once the model is built and the intro has played; says
+ * whether the model took it.
+ */
+export function showFinding(system: SystemId | null) {
+  const st = useStory.getState();
+  const s = useScene.getState();
+  if (st.step !== 0 || st.touring || s.ready !== STORY_CAR || performance.now() < introUntil) return false;
+  if (st.finding === system) return true;
+  useStory.setState({ finding: system });
+  s.setXray(Boolean(system));
+  s.setIsolate(system ? [system] : null);
+  return true;
 }
 
 /** Put the scene in the state a chapter describes. */
 export function applyStep(step: number) {
   clearTimers();
+  introUntil = 0;
+  useStory.setState({ finding: null });
   const s = useScene.getState();
   switch (step) {
     case 0:

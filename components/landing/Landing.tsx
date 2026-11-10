@@ -1,37 +1,27 @@
 "use client";
 import clsx from "clsx";
-import { ArrowRight, ArrowUpRight, CalendarCheck, Monitor, Moon, Package, Play, ShieldCheck, Square, Sun, UserRoundCog, Zap } from "lucide-react";
+import { ArrowRight, ArrowUpRight, CalendarCheck, Check, Copy, Monitor, Moon, Package, Play, Search, ShieldCheck, Square, Sun, UserRoundCog, Zap } from "lucide-react";
 import { useTheme } from "next-themes";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import mark from "@/public/brand/crankwell-mark.webp";
-import { CAR_SPECS, getCar, getPart, partCode } from "@/lib/cars";
+import { CAR_IDS, CAR_SPECS, getCar, getPart, partCode } from "@/lib/cars";
+import { SYSTEM_IDS, SYSTEM_META, type SystemId } from "@/lib/cars/types";
 import { findShops, findTechnicians } from "@/lib/catalog/providers";
 import { getSpareParts } from "@/lib/catalog/spare-parts";
 import { confidenceColor } from "@/lib/confidence";
 import { useMounted } from "@/lib/hooks";
-import { CHAPTERS, CHECKS, STORY_CAR, SUSPECTS, applyStep, setStoryExplode, startIntro, stopStory, useStory } from "@/lib/landing/story";
+import { CHAPTERS, CHECKS, EXAMPLES, STORY_CAR, SUSPECTS, applyStep, setStoryExplode, showFinding, startIntro, stopStory, useStory } from "@/lib/landing/story";
 import { useScene } from "@/lib/store/scene";
 import { compactMoney, money } from "../ui";
 import { Elevation } from "./Elevation";
 import { LandingStage } from "./LandingStage";
-import { focusLine, playTour, stopTour } from "./tour";
+import { PayPalSection } from "./PayPalSection";
+import { focusLine, playTour, scrollToStep, stopTour } from "./tour";
 import "./landing.css";
 
-const SYMPTOMS = [
-  "My brake pedal feels soft and sinks to the floor",
-  "Car won't start, it just clicks",
-  "Engine temperature is going into the red",
-  "Grinding noise when I brake",
-  "Steering wheel shakes above 60 mph",
-];
-const QUICK = [
-  { label: "Soft brake pedal", message: SYMPTOMS[0] },
-  { label: "Won't start", message: SYMPTOMS[1] },
-  { label: "Overheating", message: SYMPTOMS[2] },
-];
 const PRICED = ["engine.block", "exhaust.cat", "cooling.radiator", "brakes.master_cylinder", "suspension.strut.fl", "electrical.battery", "wheels.tire.fl", "brakes.pads.fl"];
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -77,36 +67,64 @@ function useStoryDriver() {
   }, []);
 }
 
-/** Types out example symptoms in the empty field. */
-function useTypewriter(lines: string[]) {
-  const [text, setText] = useState(lines[0]);
+/** How long a typed example stays on the model before the next one. */
+const HOLD_MS = 3800;
+
+/**
+ * Types the example symptoms into the empty field. Each one, once typed, shows on the model: the body
+ * turns to glass around the system it points at. It waits while the page is scrolled past the hero.
+ */
+function useExamples() {
+  const [text, setText] = useState(EXAMPLES[0].text);
   const [index, setIndex] = useState(0);
   useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    let i = 0;
     let line = 0;
+    let i = EXAMPLES[0].text.length;
     let deleting = false;
     let t: ReturnType<typeof setTimeout>;
     const tick = () => {
-      const full = lines[line];
+      const full = EXAMPLES[line].text;
       if (!deleting && i < full.length) i++;
       else if (!deleting) {
-        deleting = true;
-        t = setTimeout(tick, 1900);
+        // Typed: hand it to the model, and hold. Not at the top of the page (or not built yet)? Ask again shortly.
+        const shown = showFinding(EXAMPLES[line].system);
+        deleting = shown;
+        t = setTimeout(tick, shown ? HOLD_MS : 500);
         return;
-      } else if (i > 0) i -= 2;
-      else {
+      } else if (i > 0) {
+        if (i === full.length) showFinding(null);
+        i -= 2;
+      } else {
         deleting = false;
-        line = (line + 1) % lines.length;
+        line = (line + 1) % EXAMPLES.length;
         setIndex(line);
       }
-      setText(lines[line].slice(0, Math.max(0, i)));
+      setText(EXAMPLES[line].text.slice(0, Math.max(0, i)));
       t = setTimeout(tick, deleting ? 16 : 38);
     };
-    t = setTimeout(tick, 2600);
+    t = setTimeout(tick, 1600);
     return () => clearTimeout(t);
-  }, [lines]);
-  return { text, full: lines[index] };
+  }, []);
+  return { text, full: EXAMPLES[index].text };
+}
+
+/** Sections below the story rise in as they enter the viewport. */
+function useReveal() {
+  useEffect(() => {
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          (e.target as HTMLElement).dataset.in = "";
+          io.unobserve(e.target);
+        }
+      },
+      { rootMargin: "0px 0px -10% 0px" },
+    );
+    document.querySelectorAll(".lp [data-reveal]").forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, []);
 }
 
 function ThemeButton() {
@@ -168,40 +186,96 @@ function Chapter({ step, title, lead, children }: { step: number; title: ReactNo
 
 type Agent = { label: string; provider: string };
 
-function Hero({ agent }: { agent: Agent }) {
+/** The numbers a judge would ask for first. The eval figures are the latest run in docs/eval.md. */
+function Proof() {
+  const items = [
+    [String(getCar(STORY_CAR).parts.length), "parts, each one priced"],
+    ["8", "PayPal products"],
+    ["41/41", "eval scenarios passed"],
+    ["0", "charges without a tap"],
+  ];
+  return (
+    <ul className="lp-proof">
+      {items.map(([n, label]) => <li key={label}><b>{n}</b><span>{label}</span></li>)}
+    </ul>
+  );
+}
+
+function Hero() {
   const router = useRouter();
   const [value, setValue] = useState("");
-  const { text, full } = useTypewriter(SYMPTOMS);
+  const { text, full } = useExamples();
   const go = (q: string) => router.push(`/app?q=${encodeURIComponent(q.trim())}`);
   return (
     <article className="lp-ch lp-hero" data-step={0} id="ch-describe" aria-labelledby="hero-t">
-      <div className="lp-ch-inner">
-        <div className="fig lp-num"><b>01</b> / {pad(CHAPTERS.length)} — AI mechanic · PayPal checkout</div>
-        <h1 id="hero-t" className="lp-h1 mt-5">
-          <span>Tell it what&apos;s wrong.</span>
-          <span className="ink">Watch it find it.</span>
+      <div className="lp-hero-main">
+        <p className="fig lp-kicker"><span className="live-dot" aria-hidden="true" /> AI mechanic · pays with PayPal</p>
+        <h1 id="hero-t" className="lp-h1">
+          <span>Tell it what&apos;s wrong.</span> <span className="ink">Watch it find it.</span>
         </h1>
-        <p className="lp-lead">
-          Crankwell diagnoses your car on a <strong>live 3D model</strong>, walks you through checks that are safe to do in the driveway, and pays for the fix with <strong>PayPal</strong>.
-        </p>
-        <form className="lp-order" onSubmit={(e) => { e.preventDefault(); go(value.trim() || full); }}>
-          <label htmlFor="lp-symptom" className="fig">Work order — describe the symptom</label>
-          <div className="lp-field">
-            <input id="lp-symptom" value={value} onChange={(e) => setValue(e.target.value)} placeholder={text} autoComplete="off" enterKeyHint="go" maxLength={300} />
-            <button type="submit" className="lp-btn">Diagnose <ArrowRight size={14} /></button>
+        <div className="lp-hero-body">
+          <p className="lp-lead">
+            Crankwell diagnoses your car on a <strong>live 3D model</strong>, walks you through checks that are safe to do in the driveway, and pays for the fix with <strong>PayPal</strong>.
+          </p>
+          <form className="lp-ask" onSubmit={(e) => { e.preventDefault(); go(value.trim() || full); }}>
+            <label htmlFor="lp-symptom" className="sr-only">Describe the symptom</label>
+            <div className="lp-ask-row">
+              <Search size={17} strokeWidth={1.75} className="shrink-0 text-faint" aria-hidden="true" />
+              <input id="lp-symptom" value={value} onChange={(e) => setValue(e.target.value)} placeholder={text} autoComplete="off" enterKeyHint="go" maxLength={300} />
+              <button type="submit" className="lp-btn lp-btn-accent">Diagnose <ArrowRight size={14} /></button>
+            </div>
+            <div className="lp-ask-foot">
+              <span className="fig">Try</span>
+              {EXAMPLES.slice(0, 3).map((x) => <button key={x.chip} type="button" className="lp-chip" onClick={() => go(x.text)}>{x.chip}</button>)}
+            </div>
+          </form>
+          <div className="lp-hero-cta">
+            <TourButton />
+            <span className="fig">or scroll ↓ six steps, one diagnosis</span>
           </div>
-          <div className="lp-chips">
-            {QUICK.map((q) => <button key={q.label} type="button" className="lp-chip" onClick={() => go(q.message)}>{q.label}</button>)}
-          </div>
-        </form>
-        <div className="mt-8 flex flex-wrap items-center gap-3">
-          <TourButton />
-          <span className="fig">or scroll ↓ six steps, one diagnosis</span>
         </div>
-        <div className="fig lp-built"><span>{agent.label}</span><span>PayPal Orders · Vault</span><span>MCP for Claude</span><span>Three.js</span></div>
       </div>
+      <Proof />
     </article>
   );
+}
+
+/** Chapter 2: every system on the car, each one a tap away from standing alone in the glass body. */
+function Systems() {
+  const on = useStory((s) => s.step === 1);
+  const [pinned, setPinned] = useState<SystemId | null>(null);
+  const counts = useMemo(() => {
+    const m = new Map<SystemId, number>();
+    for (const p of getCar(STORY_CAR).parts) m.set(p.system, (m.get(p.system) ?? 0) + 1);
+    return m;
+  }, []);
+  const show = (id: SystemId | null) => useScene.getState().setIsolate(id ? [id] : null);
+  const pick = (id: SystemId) => {
+    if (!on) return scrollToStep(1);
+    const next = pinned === id ? null : id;
+    setPinned(next);
+    show(next);
+  };
+  return (
+    <>
+      <div className="fig mt-7">Isolate a system</div>
+      <div className="lp-systems" role="group" aria-label="Isolate a system on the model">
+        {SYSTEM_IDS.filter((id) => id !== "body" && id !== "interior" && counts.has(id)).map((id) => (
+          <button key={id} type="button" className="lp-sys" aria-pressed={pinned === id}
+            onClick={() => pick(id)}
+            onPointerEnter={(e) => { if (on && e.pointerType === "mouse") show(id); }}
+            onPointerLeave={(e) => { if (on && e.pointerType === "mouse") show(pinned); }}>
+            <i style={{ background: SYSTEM_META[id].color }} />{SYSTEM_META[id].label}<small>{counts.get(id)}</small>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function SystemsChapter() {
+  const on = useStory((s) => s.step === 1);
+  return <Systems key={on ? "on" : "off"} />;
 }
 
 function SuspectTable({ values, delta }: { values: number[]; delta?: number[] }) {
@@ -374,29 +448,70 @@ function ClaudeMock() {
   );
 }
 
+/** The URL to paste into Claude, with a copy button. */
+function Connector({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () =>
+    navigator.clipboard?.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    }).catch(() => {});
+  return (
+    <div className="lp-code">
+      <span className="fig">Connector</span>
+      <code>{url}</code>
+      <button type="button" onClick={copy} aria-label="Copy the connector URL" title="Copy">
+        {copied ? <Check size={14} className="text-ok" /> : <Copy size={14} />}
+      </button>
+    </div>
+  );
+}
+
+/** The latest run of `pnpm eval` on DeepSeek V4 (docs/eval.md). */
+const EVAL = [
+  ["41/41", "scenarios passed, scored without a model grading a model"],
+  ["100%", "don't-drive recall on safety-critical cases"],
+  ["100%", "right part ranked first"],
+  ["0", "unsafe instructions, false “it's paid” claims or charges without a tap"],
+  ["5/5", "adversarial prompts turned away"],
+];
+
 const specRows = (agent: Agent): [string, ReactNode, string?][] => [
-  ["Agent", `${agent.label} on ${agent.provider}`, "Tool calling and streaming: it moves the camera, ranks suspects, asks for checks and prices fixes"],
-  ["Payments", "PayPal Orders v2, Payments v2, Invoicing v2", "Capture for parts, authorize → capture/void for shop deposits, invoices for technicians, refunds"],
-  ["One-tap", "PayPal Vault", "Saved after the first approval; capped per order and per day"],
-  ["Live status", "PayPal webhooks", "Server-sent events push every status change to the ledger"],
+  ["Agent", `${agent.label} on ${agent.provider}`, "A streaming tool loop with failover: it moves the camera, ranks suspects, asks for checks and prices fixes"],
+  ["Payments", "PayPal Orders v2, Payments v2, Invoicing v2", "Capture for parts, authorize → capture or void for shop deposits, invoices for technicians, full and partial refunds"],
+  ["Money out", "PayPal Payouts", "The technician's share when a job is settled, followed by webhook until it's final"],
+  ["One tap", "PayPal Vault, Pay Later", "Saved on the first approval and capped per order and per day; spending limits on top"],
+  ["Live status", "PayPal webhooks, reconciler", "Signature-verified events reach the ledger over server-sent events; anything left open is re-checked with PayPal"],
+  ["After the sale", "PayPal Agent Toolkit", "Order, invoice and dispute lookups, scoped to the user's own orders"],
   ["Claude", "MCP server + MCP Apps card", "OAuth 2.1 with PKCE pairs Claude with your browser; purchases need a signed confirm in the card"],
-  ["3D", "Three.js, React Three Fiber", "Two cars built from code: 118 and 125 parts, no model files"],
-  ["Data", "AG Grid", "Price guide linked to the model; orders ledger"],
+  ["3D", "Three.js, React Three Fiber", `Two cars built from code: ${getCar("corolla").parts.length} and ${getCar("crv").parts.length} parts, no model files`],
+  ["Data", "AG Grid Enterprise", "A price guide linked to the model and an orders ledger. Ask either one in words"],
 ];
 
 function Specification({ agent }: { agent: Agent }) {
-  const spec = CAR_SPECS[STORY_CAR];
   return (
-    <section id="spec" className="lp-section">
+    <section id="spec" className="lp-section lp-paper">
       <div className="lp-wrap">
-        <div className="fig lp-num"><b>Specification</b></div>
-        <h2 className="lp-h2 max-w-[18ch]">Every part is code. Every price is real-world.</h2>
+        <div data-reveal="">
+          <div className="fig lp-num"><b>Under the hood</b></div>
+          <h2 className="lp-h2 lp-h2-xl">Built from code. Measured before it shipped.</h2>
+        </div>
+        <ul className="lp-eval" data-reveal="">
+          {EVAL.map(([n, label]) => <li key={label}><b>{n}</b><span>{label}</span></li>)}
+        </ul>
         <div className="lp-spec-grid">
-          <figure>
-            <div className="lp-figure"><Elevation carId={STORY_CAR} className="w-full" /></div>
-            <figcaption className="fig mt-2.5">Fig. 7 — {spec.make} {spec.model} {spec.generation}, side elevation · drawn from the spec that builds the 3D model</figcaption>
-          </figure>
-          <table className="lp-spec">
+          <div className="lp-figures" data-reveal="">
+            {CAR_IDS.map((id, i) => {
+              const spec = CAR_SPECS[id];
+              return (
+                <figure key={id}>
+                  <div className="lp-figure"><Elevation carId={id} className="w-full" /></div>
+                  <figcaption className="fig mt-2.5">Fig. {7 + i} — {spec.make} {spec.model} {spec.generation}, side elevation{i === 0 && " · drawn from the spec that builds the 3D model"}</figcaption>
+                </figure>
+              );
+            })}
+          </div>
+          <table className="lp-spec" data-reveal="" style={{ "--d": 1 } as CSSProperties}>
             <tbody>
               {specRows(agent).map(([k, v, note]) => (
                 <tr key={k}><th scope="row">{k}</th><td>{v}{note && <small>{note}</small>}</td></tr>
@@ -409,19 +524,22 @@ function Specification({ agent }: { agent: Agent }) {
   );
 }
 
-export function Landing({ sandbox, agent }: { sandbox: { email: string; password: string } | null; agent: Agent }) {
+export function Landing({ sandbox, agent, mcpUrl }: { sandbox: { email: string; password: string } | null; agent: Agent; mcpUrl: string }) {
   useStoryDriver();
+  useReveal();
+  const mounted = useMounted();
   return (
-    <div className="lp">
+    <div className={clsx("lp", mounted && "js")}>
       <header className="lp-nav">
         <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="Crankwell">
           <Image src={mark} alt="" width={28} height={28} sizes="28px" priority className="rounded-[7px] bg-white ring-1 ring-line" />
           <span className="text-[15px] font-semibold tracking-[-0.025em]">Crankwell</span>
         </Link>
-        <nav aria-label="Sections" className="hidden items-center gap-5 md:flex">
+        <nav aria-label="Sections" className="hidden items-center gap-6 md:flex">
           <a className="lp-link" href="#ch-see">How it works</a>
+          <a className="lp-link" href="#paypal">PayPal</a>
           <a className="lp-link" href="#claude">In Claude</a>
-          <a className="lp-link" href="#spec">Specification</a>
+          <a className="lp-link" href="#spec">Under the hood</a>
         </nav>
         <div className="ml-auto flex items-center gap-1.5">
           <span className="fig mr-2 hidden items-center gap-1.5 lg:inline-flex"><span className="h-1.5 w-1.5 rounded-full bg-pay" /> PayPal sandbox</span>
@@ -434,8 +552,10 @@ export function Landing({ sandbox, agent }: { sandbox: { email: string; password
         <section className="lp-story" aria-label="How Crankwell works">
           <LandingStage />
           <div className="lp-chapters">
-            <Hero agent={agent} />
-            <Chapter step={1} title="It sees through the body." lead={<>The body turns to glass so the parts that matter show. Every system is real geometry you can turn, isolate and take apart, not a photo.</>} />
+            <Hero />
+            <Chapter step={1} title="It sees through the body." lead={<>The body turns to glass so the parts that matter show. Every system is real geometry you can turn, isolate and take apart, not a photo.</>}>
+              <SystemsChapter />
+            </Chapter>
             <Chapter step={2} title="It ranks what's likely." lead={<>The agent calls its tools and the model answers: suspects light up in place, numbered and scored, and the camera flies to the strongest lead.</>}>
               <RankTable />
             </Chapter>
@@ -451,20 +571,23 @@ export function Landing({ sandbox, agent }: { sandbox: { email: string; password
           </div>
         </section>
 
-        <section id="claude" className="lp-section">
+        <PayPalSection />
+
+        <section id="claude" className="lp-section lp-paper">
           <div className="lp-wrap lp-two">
-            <div>
+            <div data-reveal="">
               <div className="fig lp-num"><b>Also inside Claude</b></div>
-              <h2 className="lp-h2">Ask Claude. Crankwell answers on the model.</h2>
+              <h2 className="lp-h2 lp-h2-lg">Ask Claude. Crankwell answers on the model.</h2>
               <p className="lp-lead">Add Crankwell as a connector and Claude gets the same tools: diagnose, price, prepare a purchase. Every diagnosis opens in 3D from a link, and nothing is bought until you confirm in the card.</p>
+              <Connector url={mcpUrl} />
               <dl className="lp-facts">
-                <div><dt>Server</dt><dd>MCP over HTTP at <span className="mono text-[12px]">/api/mcp</span></dd></div>
+                <div><dt>Server</dt><dd>MCP over Streamable HTTP, with MCP Apps cards</dd></div>
                 <div><dt>Pairing</dt><dd>OAuth 2.1, PKCE S256, tied to your browser session</dd></div>
-                <div><dt>UI</dt><dd>MCP Apps card, <span className="mono text-[12px]">ui://crankwell/card</span></dd></div>
+                <div><dt>Sign-in</dt><dd>Only at the first purchase; a diagnosis needs no account</dd></div>
                 <div><dt>Purchases</dt><dd>Confirm is app-only and signed per action</dd></div>
               </dl>
             </div>
-            <ClaudeMock />
+            <div data-reveal="" style={{ "--d": 1 } as CSSProperties}><ClaudeMock /></div>
           </div>
         </section>
 
@@ -474,7 +597,7 @@ export function Landing({ sandbox, agent }: { sandbox: { email: string; password
       <footer className="lp-foot">
         <div className="fig">End of manual</div>
         <h2 className="mt-4">Your car, explained.</h2>
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
+        <div className="mt-9 flex flex-wrap items-center justify-center gap-2">
           <Link href="/app" className="lp-btn lp-btn-lg">Open the garage <ArrowRight size={16} /></Link>
           <TourButton className="lp-btn-lg" />
         </div>

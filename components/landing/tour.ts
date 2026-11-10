@@ -1,5 +1,5 @@
 "use client";
-import { useStory } from "@/lib/landing/story";
+import { applyStep, useStory } from "@/lib/landing/story";
 
 // Scrolling for the landing page: jump to a chapter, or play the whole story
 // hands-free (for judges, and for recording the demo video).
@@ -62,6 +62,8 @@ export async function playTour() {
   const events = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
   // Any input from the visitor takes over. Listen after this click has finished.
   const arm = setTimeout(() => events.forEach((e) => window.addEventListener(e, stop, { passive: true })), 80);
+  // Start from the plain car, whatever the hero's example was showing.
+  if (useStory.getState().step === 0) applyStep(0);
   useStory.setState({ touring: true });
   try {
     const els = [...document.querySelectorAll<HTMLElement>("[data-step]")];
@@ -75,8 +77,8 @@ export async function playTour() {
       }
       await wait(DWELL[step] ?? 2500, ctrl.signal);
     }
-    const next = document.getElementById("claude");
-    if (next) await glide(next.getBoundingClientRect().top + window.scrollY - 52, 1400, ctrl.signal);
+    const next = document.getElementById("paypal");
+    if (next) await glide(next.getBoundingClientRect().top + window.scrollY - 56, 1400, ctrl.signal);
   } catch {
     // stopped by the visitor
   } finally {
