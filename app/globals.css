@@ -30,7 +30,6 @@
   --ok: #1d7a3c;
   --warn: #9a5800;
   --danger: #c62f1c;
-  --fault: #e0530d;
   --pay: #ffc439;
   --pay-ink: #102a5c;
   --rule: rgba(30, 27, 22, 0.055);
@@ -61,7 +60,6 @@
   --ok: #4ade80;
   --warn: #fbbf24;
   --danger: #ff6b5b;
-  --fault: #ff8a3d;
   --pay: #ffc439;
   --pay-ink: #102a5c;
   --rule: rgba(150, 180, 230, 0.055);
@@ -100,7 +98,6 @@
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-danger: var(--danger);
-  --color-fault: var(--fault);
   --color-pay: var(--pay);
   --color-pay-ink: var(--pay-ink);
   --font-sans: var(--font-geist-sans);

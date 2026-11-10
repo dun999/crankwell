@@ -348,7 +348,7 @@ export function registerCrankwell(server: McpServer) {
     {
       title: "Prepare a change to an order",
       description:
-        "Prepare a change to an order the user already has and show it as a confirm card: refund (a part or captured deposit), check_in (capture the held shop deposit), cancel_reservation (release the hold), cancel_invoice (an unpaid technician invoice) or complete_job (a paid technician visit is finished: unused labor is refunded, the technician is paid). Use an order_ref and one of its allowed_changes from get_orders. Nothing changes until the user taps the card.",
+        "Prepare a change to an order the user already has and show it as a confirm card: refund (a part or captured deposit), check_in (capture the held shop deposit), cancel_reservation (release the hold), cancel_invoice or remind_invoice (cancel or re-send an unpaid technician invoice) or complete_job (a paid technician visit is finished: unused labor is refunded, the technician is paid). Use an order_ref and one of its allowed_changes from get_orders. Nothing changes until the user taps the card.",
       inputSchema: OrderChangeS,
       annotations: { title: "Prepare a change to an order", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       _meta: ui,
@@ -371,7 +371,7 @@ export function registerCrankwell(server: McpServer) {
       title: "Get purchase status",
       description: "Whether a prepared purchase was paid, held, invoiced, expired or cancelled, with the PayPal ids.",
       inputSchema: z.object({ action_id: z.string().max(60) }),
-      annotations: { title: "Get purchase status", ...lookup, idempotentHint: true },
+      annotations: { title: "Get purchase status", ...lookup },
     },
     (a) =>
       guard(() => {

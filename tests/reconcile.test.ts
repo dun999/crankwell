@@ -180,6 +180,13 @@ describe("reconciler", () => {
     expect(actions.recoverStuckActions()).toHaveLength(2);
     expect(actions.getAction(stuck.id)).toMatchObject({ status: "pending", error: expect.stringMatching(/interrupted/) });
     expect(actions.getAction(paid.id)).toMatchObject({ status: "confirmed", txId: tx.id, via: "vault" });
+
+    // Interrupted while the mechanic bought within a spending limit: still that limit's purchase.
+    const bought = actions.prepareAction(s, { kind: "parts", carId: "corolla", partId: "brakes.pads.fl", items: [{ sku: pads.sku, quantity: 1 }] }, { source: "app" });
+    await commerce.createPartsOrder({ sessionId: s, items: [{ sku: pads.sku, quantity: 1 }], carId: "corolla", partId: "brakes.pads.fl", origin, vault: { vaultId: "VAULT-RC" }, actionId: bought.id, mandateId: "mdt_test" });
+    setConfirming(bought.id);
+    expect(actions.recoverStuckActions()).toEqual([bought.id]);
+    expect(actions.getAction(bought.id)).toMatchObject({ status: "confirmed", via: "mandate", mandateId: "mdt_test" });
   });
 });
 

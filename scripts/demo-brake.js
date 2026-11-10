@@ -18,7 +18,6 @@
       { id: "wet", title: "Look for wet spots at each wheel", why: "Fluid on the inside of a tire means a caliper or hose leak.", steps: ["Use a flashlight to look at the inner side of each wheel and the ground beneath."], safetyNote: "Don't crawl under the car.", answerOptions: ["All dry", "Wet at one wheel", "Not sure"] },
     ],
   };
-  const chat = window.__chat.getState();
   window.__chat.setState({ messages: [
     { id: "u1", role: "user", blocks: [{ kind: "text", text: "My brake isn't working properly. The pedal feels soft and sinks." }] },
     { id: "a1", role: "assistant", blocks: [
@@ -29,6 +28,5 @@
     ] },
   ] });
   window.__applyUi(diag);
-  void chat;
   return "ok";
 })();

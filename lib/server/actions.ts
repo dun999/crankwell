@@ -221,10 +221,6 @@ export function getAction(id: string): Action | undefined {
   return load(id)?.action;
 }
 
-export function getOwnedAction(id: string, sessionId: string): Action {
-  return owned(id, sessionId);
-}
-
 export const actionOwnedBy = (id: string, sessionId: string) => load(id)?.sessionId === sessionId;
 
 export function listActions(sessionId: string, caseId?: string): Action[] {
@@ -244,10 +240,16 @@ export function cancelAction(id: string, sessionId: string): Action {
 
 /** Charged with saved PayPal (one tap, or by the mechanic within a mandate) in the last 24 hours. */
 export function oneTapSpentToday(sessionId: string) {
-  const since = Date.now() - 24 * 3600_000;
-  return listActions(sessionId)
-    .filter((a) => (a.via === "vault" || a.via === "mandate") && a.status === "confirmed" && a.confirmedAt && Date.parse(a.confirmedAt) > since)
-    .reduce((sum, a) => sum + Number(a.amount), 0);
+  const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+  // Every confirmed charge counts, however many cards the session has opened since (listActions
+  // only returns the newest 20, which would let older charges drop out of the daily cap).
+  const rows = db()
+    .prepare(
+      `SELECT json_extract(data, '$.amount') AS amount FROM actions
+       WHERE session_id = ? AND status = 'confirmed' AND json_extract(data, '$.via') IN ('vault', 'mandate') AND json_extract(data, '$.confirmedAt') > ?`,
+    )
+    .all(sessionId, since) as { amount: string }[];
+  return rows.reduce((sum, r) => sum + Number(r.amount), 0);
 }
 
 /** Why one-tap isn't available for this action, or null when it is. */
@@ -440,9 +442,12 @@ export function recoverStuckActions(nowMs = Date.now()): string[] {
     const a = load(id)?.action;
     if (!a || nowMs - Date.parse(a.confirmingSince ?? a.createdAt) < STUCK_CONFIRM_MS) continue;
     const tx = a.txId ? txGet(a.txId) : txForAction(id);
+    // A purchase the mechanic made within a spending limit stays counted against that limit.
+    const mandateId = typeof tx?.meta?.mandateId === "string" ? tx.meta.mandateId : undefined;
+    const via = tx?.kind === "technician_invoice" ? "invoice" : mandateId ? "mandate" : "vault";
     const next =
       tx && settled(tx)
-        ? write(id, { status: "confirmed", txId: tx.id, via: tx.kind === "technician_invoice" ? "invoice" : "vault", confirmedAt: now(), error: undefined }, "confirming")
+        ? write(id, { status: "confirmed", txId: tx.id, via, ...(mandateId ? { mandateId } : {}), confirmedAt: now(), error: undefined }, "confirming")
         : write(id, { status: "pending", error: "The last attempt was interrupted. Check Orders before you try again." }, "confirming");
     if (next) fixed.push(id);
   }

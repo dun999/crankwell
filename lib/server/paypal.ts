@@ -21,7 +21,7 @@ import {
 
 // PayPal integration (sandbox by default).
 //  - Orders v2, Payments v2 and Vault v3 go through the official Server SDK.
-//  - Invoicing v2, Payouts and webhook signature verification aren't in the SDK, so they use the
+//  - Invoicing v2, order tracking, Payouts and webhook signature verification aren't in the SDK, so they use the
 //    REST API directly with the same OAuth credentials.
 
 export class PayPalNotConfigured extends Error {
@@ -67,7 +67,10 @@ export function paypalErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : "PayPal request failed";
 }
 
-// ───────────────────────── REST (Invoicing, Webhooks) ─────────────────────────
+// ───────────────────────── REST (what the SDK doesn't cover) ─────────────────────────
+
+/** Same limit as the SDK client, so a stalled PayPal call can't hold a request or the reconciler. */
+const REST_TIMEOUT_MS = 30_000;
 
 export class RestError extends Error {
   constructor(
@@ -87,6 +90,7 @@ async function accessToken(): Promise<string> {
     method: "POST",
     headers: { authorization: `Basic ${basic}`, "content-type": "application/x-www-form-urlencoded" },
     body: "grant_type=client_credentials",
+    signal: AbortSignal.timeout(REST_TIMEOUT_MS),
   });
   const body = await r.json();
   if (!r.ok) throw new RestError(r.status, body);
@@ -110,6 +114,7 @@ export async function paypalRest<T>(path: string, init: { method?: string; body?
     method: init.method ?? "GET",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...init.headers },
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    signal: AbortSignal.timeout(REST_TIMEOUT_MS),
   });
   const text = await r.text();
   const body = text ? JSON.parse(text) : undefined;
@@ -139,7 +144,6 @@ export interface VaultInfo {
   customerId?: string;
 }
 
-/** What happened to an order: payer action needed, or captured/authorized right away (saved wallet). */
 /** Where a parts order ships, as PayPal has it (the buyer's PayPal address, or the one we sent). */
 export interface ShipTo {
   name?: string;
@@ -151,6 +155,7 @@ export interface ShipTo {
   countryCode: string;
 }
 
+/** What happened to an order: payer action needed, or captured/authorized right away (saved wallet). */
 export function orderOutcome(o: Order) {
   const unit = o.purchaseUnits?.[0];
   const pay = unit?.payments;
@@ -249,7 +254,6 @@ function walletSource(input: { needsShipping: boolean; returnUrl: string; cancel
 
 export type OrderOutcome = ReturnType<typeof orderOutcome>;
 
-/** Read an order as PayPal has it now (the source of truth when our copy may be stale). */
 /** PayPal JSON keys in the SDK's spelling (purchase_units → purchaseUnits, address_line_1 → addressLine1). */
 const camelKeys = (v: unknown): unknown =>
   Array.isArray(v)
@@ -258,6 +262,7 @@ const camelKeys = (v: unknown): unknown =>
       ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase()), camelKeys(x)]))
       : v;
 
+/** Read an order as PayPal has it now (the source of truth when our copy may be stale). */
 export async function getOrder(orderId: string) {
   try {
     const { result } = await sdk().orders.getOrder({ id: orderId });
@@ -283,7 +288,7 @@ export async function authorizeOrder(orderId: string, requestId: string) {
   return orderOutcome(result);
 }
 
-// ───────────────────────── Vault v3 (REST) ─────────────────────────
+// ───────────────────────── Vault v3 ─────────────────────────
 
 /** Remove a saved PayPal wallet (payment token). A token that's already gone counts as removed. */
 export async function deletePaymentToken(id: string) {

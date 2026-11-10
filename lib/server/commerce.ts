@@ -104,8 +104,8 @@ export interface CheckoutOptions {
 }
 
 const returnUrls = (o: CheckoutOptions) => ({
-  returnUrl: o.returnUrl ?? `${o.origin}/?paypal=return`,
-  cancelUrl: o.cancelUrl ?? `${o.origin}/?paypal=cancel`,
+  returnUrl: o.returnUrl ?? `${o.origin}/app?paypal=return`,
+  cancelUrl: o.cancelUrl ?? `${o.origin}/app?paypal=cancel`,
 });
 
 const paidWithSavedWallet = (o: CheckoutOptions) => Boolean(o.vault && "vaultId" in o.vault);
@@ -621,7 +621,9 @@ export function applyWebhook(event: { event_type: string; resource: Resource }):
         (related.order_id && txFind("order_id", related.order_id)) ||
         (r.id && txFind("capture_id", r.id));
       if (!tx) return undefined;
-      return moveTo(tx, tx.kind === "shop_deposit" ? "CAPTURED" : "COMPLETED", event.event_type === "PAYMENT.CAPTURE.PENDING" ? "Capture pending" : "Capture completed", { captureId: r.id });
+      // An invoice payment is a capture too; the visit stays PAID so the job can still be settled.
+      const paid = tx.kind === "shop_deposit" ? "CAPTURED" : tx.kind === "technician_invoice" ? "PAID" : "COMPLETED";
+      return moveTo(tx, paid, event.event_type === "PAYMENT.CAPTURE.PENDING" ? "Capture pending" : "Capture completed", { captureId: r.id });
     }
     case "PAYMENT.CAPTURE.DENIED":
     case "PAYMENT.CAPTURE.DECLINED": {

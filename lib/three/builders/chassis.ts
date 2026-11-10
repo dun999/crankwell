@@ -277,7 +277,6 @@ export const steeringWheel: Builder = () => {
 export const cvAxle: Builder = (p, ctx) => {
   const [a, b] = local(ctx, points(p, "points"));
   const L = new THREE.Vector3(...a).distanceTo(new THREE.Vector3(...b));
-  const parts: THREE.BufferGeometry[] = [];
   const pb = new PartBuilder();
   const shaft = cylY(0.0135, L - 0.16, 16);
   shaft.translate(0, L / 2, 0);
@@ -293,7 +292,6 @@ export const cvAxle: Builder = (p, ctx) => {
   pb.add("rubber", alignBetween(ob, a, b));
   const bell = lathe([[0, L - 0.06], [0.04, L - 0.055], [0.046, L - 0.03], [0.03, L - 0.005], [0.02, L]], 28);
   pb.add("steel", alignBetween(bell, a, b));
-  void parts;
   return pb.build();
 };
 

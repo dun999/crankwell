@@ -128,6 +128,20 @@ describe("confirm", () => {
     expect(actions.oneTapBlocker(third, s)).toMatch(/a day/);
   });
 
+  it("counts every one-tap charge toward the daily cap, however many cards were opened since", async () => {
+    const s = newSession();
+    wallet.saveWallet(s, { id: "VAULT-4B", status: "VAULTED" });
+    const radiator = { kind: "parts" as const, carId: "corolla", partId: "cooling.radiator", items: [{ sku: "FYC-COROLLA-RADIATOR-P", quantity: 1 }] };
+    const first = actions.prepareAction(s, radiator, { source: "app" });
+    await actions.confirmAction(first.id, s, { origin });
+    const spent = actions.oneTapSpentToday(s);
+    expect(spent).toBeCloseTo(Number(first.amount));
+    // More cards than a listing returns: the charge must not drop out of the total.
+    for (let i = 0; i < 25; i++) actions.prepareAction(s, pads, { source: "app" });
+    expect(actions.listActions(s).some((a) => a.id === first.id)).toBe(false);
+    expect(actions.oneTapSpentToday(s)).toBeCloseTo(spent);
+  });
+
   it("expires unconfirmed offers after 15 minutes", async () => {
     const s = newSession();
     wallet.saveWallet(s, { id: "VAULT-5", status: "VAULTED" });

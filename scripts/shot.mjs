@@ -45,8 +45,6 @@ if (hover) {
     let obj = null;
     scene.traverse((o) => { if (o.userData?.partId === id) obj = o; });
     if (!obj) return null;
-    const THREE_Box = obj.children.find((c) => c.isMesh)?.geometry ? null : null;
-    void THREE_Box;
     const box = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
     obj.updateWorldMatrix(true, true);
     obj.traverse((m) => {

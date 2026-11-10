@@ -525,6 +525,3 @@ export const o2Sensors: Builder = (p, ctx) => {
   }
   return pb.build();
 };
-
-void cylX;
-void sectorShape;

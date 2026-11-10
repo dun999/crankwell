@@ -32,7 +32,7 @@ export const commerce = {
   captureDeposit: (txId: string) => post<{ tx: Transaction }>(`/api/paypal/authorizations/${txId}`, { action: "capture" }).then(track),
   voidDeposit: (txId: string) => post<{ tx: Transaction }>(`/api/paypal/authorizations/${txId}`, { action: "void" }).then(track),
   refund: (txId: string) => post<{ tx: Transaction }>(`/api/paypal/refunds/${txId}`).then(track),
-  sendInvoice: (input: { technicianId: string; email: string; when: string; notes?: string; carId: string; partId?: string; issue?: string; hours?: number; partsEstimate?: number }) =>
+  sendInvoice: (input: { technicianId: string; email: string; when: string; carId: string; partId?: string; issue?: string; hours?: number }) =>
     post<{ tx: Transaction }>("/api/paypal/invoices", input).then(track),
   refreshInvoice: (txId: string) => post<{ tx: Transaction }>(`/api/paypal/invoices/${txId}`, { action: "refresh" }).then(track),
   cancelInvoice: (txId: string) => post<{ tx: Transaction }>(`/api/paypal/invoices/${txId}`, { action: "cancel" }).then(track),
@@ -75,16 +75,19 @@ export const actions = {
     return r;
   },
   cancel: async (id: string) => {
+    await sessionReady();
     const r = await fetch(`/api/actions/${id}`, { method: "DELETE" });
-    return ((await r.json()) as { action: Action }).action;
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error ?? "Couldn't cancel this checkout");
+    return (data as { action: Action }).action;
   },
 };
 
-/** Spending limits: what the mechanic may buy without a card per purchase. */
 /** "Ask" a grid: its AG Grid AI Toolkit schema and a question in, grid state out. */
 export const askGrid = (body: { grid: "parts" | "orders"; question: string; schema: unknown; state: unknown; today: string }) =>
   post<{ state: Record<string, unknown>; explanation: string; model: string }>("/api/grid/query", body);
 
+/** Spending limits: what the mechanic may buy without a card per purchase. */
 export const mandates = {
   list: async (): Promise<Mandate[]> => {
     await sessionReady();

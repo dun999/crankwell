@@ -492,7 +492,6 @@ export function onSurface(S: BodySurface, g: THREE.BufferGeometry, x: number, v:
   // Right-handed basis on both sides (local +y points down on the left), so
   // winding stays valid; only y-symmetric details should use this helper.
   const m = new THREE.Matrix4().makeBasis(tt, u, n);
-  void side;
   m.setPosition(p.addScaledVector(n, lift));
   g.applyMatrix4(m);
   return g;

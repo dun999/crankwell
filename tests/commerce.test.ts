@@ -87,11 +87,10 @@ describe("webhooks", () => {
   it("never downgrades status on out-of-order delivery", async () => {
     const sku = getSpareParts("corolla", "cooling.radiator")[0];
     const { orderId } = await commerce.createPartsOrder({ sessionId: S, items: [{ sku: sku.sku, quantity: 1 }], carId: "corolla", partId: "cooling.radiator", origin: "" });
-    const tx = await commerce.captureOrder(orderId, S);
+    await commerce.captureOrder(orderId, S);
     const late = commerce.applyWebhook({ event_type: "CHECKOUT.ORDER.APPROVED", resource: { id: orderId } });
     expect(late?.status).toBe("COMPLETED");
     expect(late?.events.at(-1)?.source).toBe("paypal-webhook");
-    void tx;
   });
 
   it("maps refund events back to the capture via the 'up' link", async () => {

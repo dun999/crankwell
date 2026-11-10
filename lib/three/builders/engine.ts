@@ -33,11 +33,6 @@ const latheZ = (profile: [number, number][], seg = 48) => {
   g.rotateX(Math.PI / 2);
   return g;
 };
-const latheX = (profile: [number, number][], seg = 48) => {
-  const g = lathe(profile, seg);
-  g.rotateZ(-Math.PI / 2);
-  return g;
-};
 
 /** Grooved belt pulley facing +z. */
 function pulley(r: number, w = 0.024, grooves = 6) {
@@ -839,6 +834,3 @@ export const turbo: Builder = () => {
   pb.add("steel", tube([[0, -0.03, -0.012], [0.03, -0.1, -0.02], [0.08, -0.12, -0.02]], 0.0055));
   return pb.build();
 };
-
-export const ENGINE_HELPERS = { pulley, gear, latheX };
-void torus;

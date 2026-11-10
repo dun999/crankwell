@@ -33,11 +33,9 @@ export function alignBetween(g: THREE.BufferGeometry, a: V3, b: V3): THREE.Buffe
   const A = v3(a);
   const B = v3(b);
   const dir = B.clone().sub(A);
-  const len = dir.length();
   _q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
   _m.compose(A, _q, new THREE.Vector3(1, 1, 1));
   g.applyMatrix4(_m);
-  void len;
   return g;
 }
 
@@ -88,11 +86,6 @@ export function tube(points: V3[], r: number, opts: { seg?: number; radial?: num
   const len = curve.getLength();
   const seg = opts.seg ?? Math.max(8, Math.ceil(len / 0.012));
   return new THREE.TubeGeometry(curve, seg, r, opts.radial ?? 12, opts.closed ?? false);
-}
-
-/** Straight-segment polyline tube with small fillets (for hard brake/fuel lines). */
-export function polyTube(points: V3[], r: number, radial = 8) {
-  return tube(points, r, { tension: 0.1, radial });
 }
 
 /** Tube whose radius varies along its length (turbo volutes, hoses with bulges). */

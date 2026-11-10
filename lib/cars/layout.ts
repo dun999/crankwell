@@ -430,7 +430,6 @@ export function buildLayout(spec: CarSpec): CarModel {
   }
 
   // ───────────────────────── Drivetrain ─────────────────────────
-  const diffOut: Vec3 = [axF, R, -0.12];
   for (const s of [-1, 1] as const) {
     const inner: Vec3 = s < 0 ? [axF, R + 0.0, -0.36] : [axF, R + 0.0, 0.12];
     add({
@@ -443,7 +442,6 @@ export function buildLayout(spec: CarSpec): CarModel {
       stage: 0.48,
     });
   }
-  void diffOut;
   if (spec.drivetrain === "AWD") {
     add({
       id: "drivetrain.propshaft",

@@ -22,15 +22,6 @@ export function tokensToday(): number {
   return r.n;
 }
 
-export function usageToday() {
-  return db().prepare("SELECT provider, prompt_tokens, completion_tokens, calls FROM llm_usage WHERE day = ?").all(day()) as {
-    provider: string;
-    prompt_tokens: number;
-    completion_tokens: number;
-    calls: number;
-  }[];
-}
-
 /** Daily token budget across providers; AGENT_DAILY_TOKEN_BUDGET=0 turns it off. */
 export const dailyBudget = () => {
   const v = Number(process.env.AGENT_DAILY_TOKEN_BUDGET ?? 3_000_000);

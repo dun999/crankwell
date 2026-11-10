@@ -1,7 +1,7 @@
 "use client";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { getCar, getPart } from "@/lib/cars";
+import { getPart } from "@/lib/cars";
 import type { SystemId } from "@/lib/cars/types";
 import type { DiagnosisCase, SafetyTest, TraceSummary, UiEvent } from "@/lib/agent/events";
 import type { Action } from "@/lib/commerce/types";
@@ -251,7 +251,3 @@ export const useChat = create<ChatState>()(
     },
   ),
 );
-
-export function partLabel(carId: Parameters<typeof getCar>[0], id: string) {
-  return getPart(carId, id)?.name ?? id;
-}

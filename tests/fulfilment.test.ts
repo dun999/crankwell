@@ -202,6 +202,16 @@ describe("payout and refund webhooks", () => {
     expect(txGet(two.id)!.payout).toMatchObject({ status: "SUCCESS", itemId: "ITEM-1" });
   });
 
+  it("keeps a paid visit PAID when PayPal also reports the invoice payment as a capture", async () => {
+    const s = newSession();
+    const tx = await paidVisit(s);
+    const after = commerce.applyWebhook({ event_type: "PAYMENT.CAPTURE.COMPLETED", resource: { id: "PAY-1" } })!;
+    expect(after.id).toBe(tx.id);
+    expect(after.status).toBe("PAID");
+    // Still settleable: a COMPLETED invoice would have no allowed changes.
+    expect(allowedOps(after)).toEqual(["complete_job"]);
+  });
+
   it("logs a partial refund without marking the payment refunded", async () => {
     const s = newSession();
     const tx = await paidVisit(s);

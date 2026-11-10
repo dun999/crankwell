@@ -3,7 +3,7 @@ import type OpenAI from "openai";
 import { z } from "zod";
 import { formatPrice, getCar, getPart } from "@/lib/cars";
 import { CAR_SPECS } from "@/lib/cars/specs";
-import type { CarId } from "@/lib/cars/types";
+import { SYSTEM_IDS, type CarId } from "@/lib/cars/types";
 import { DEFAULT_LOCATION, findShops, findTechnicians, getShop, getTechnician, slotOpen } from "@/lib/catalog/providers";
 import { slotLabel } from "@/lib/catalog/slots";
 import { findSku, getSpareParts } from "@/lib/catalog/spare-parts";
@@ -13,7 +13,6 @@ import { oneTapBlocker, prepareAction } from "@/lib/server/actions";
 import { CommerceError, listTransactions } from "@/lib/server/commerce";
 import { ordersForAgent } from "@/lib/server/reconcile";
 import { buyWithinMandate, proposeMandate, revokeAllMandates } from "@/lib/server/mandates";
-import { SYSTEM_IDS } from "@/lib/cars/types";
 import type { RecommendedAction, Suspect, UiEvent, ViewContext } from "./events";
 
 export const CarIdS = z.enum(["corolla", "crv"]);

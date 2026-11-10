@@ -10,7 +10,6 @@ export type MatKey =
   | "glassDark"
   | "chrome"
   | "blackGloss"
-  | "blackTrim"
   | "alu"
   | "aluCast"
   | "aluBrushed"
@@ -99,7 +98,6 @@ export function createMaterials(opts: { paint: string; coolant: string; wheelDar
     }),
     chrome: P({ color: "#f0f2f5", metalness: 1, roughness: 0.06, envMapIntensity: 1.3 }),
     blackGloss: P({ color: "#08090a", metalness: 0.1, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.04 }),
-    blackTrim: S({ color: "#141517", roughness: 0.7, metalness: 0.05, normalMap: tx.grain, normalScale: new THREE.Vector2(0.4, 0.4) }),
     alu: S({ color: "#c7cbd1", metalness: 1, roughness: 0.32 }),
     aluCast: S({
       color: "#a7abb2",

@@ -90,7 +90,7 @@ async function fulfil(nowMs: number, fixed: string[]) {
   return errors;
 }
 
-/** One reconciliation pass. Concurrent calls share the run in progress. */
+/** One reconciliation pass. A call made while one is running returns at once with nothing done. */
 export async function reconcileOnce(nowMs = Date.now()): Promise<{ fixed: string[]; errors: number }> {
   if (st.running) return { fixed: [], errors: 0 };
   st.running = true;
