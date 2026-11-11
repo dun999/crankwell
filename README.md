@@ -247,3 +247,7 @@ lib/server               SQLite, PayPal client, Agent Toolkit, commerce state ma
 - Shops and technicians are seeded demo data placed around the browser's location (or San Jose, CA by default). They aren't real businesses. Parts "ship" with a sandbox carrier.
 - Prices are typical market estimates, not quotes.
 - The agent gives guidance, not a guaranteed diagnosis. Anything safety-critical should be inspected by a qualified mechanic.
+
+## License
+
+[MIT](LICENSE). Third-party packages keep their own licenses; AG Grid Enterprise runs here without a license key (trial watermark).
